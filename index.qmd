@@ -1,0 +1,19 @@
+---
+title: "My Quarto Website"
+---
+
+This is a Quarto website. Visitors will access your analyses through the
+sidebar at left.
+
+Include a short description of your project here and perhaps a table or helpful graphic.
+
+```{r, echo=FALSE, message=FALSE}
+library(tidyverse)
+tribble(
+  ~sample_id, ~age, ~location,
+  "capybara1", 5, "Philadelphia Zoo",
+  "capybara2", 27, "South St"
+)
+```
+
+![The exterior of CHOP's rainbow building with a couple of Indego bikes.](assets/chop_bikes.jpg){width=50%}\

@@ -1,0 +1,31 @@
+project:
+  type: website
+  execute-dir: project
+  render:
+    - index.qmd
+    - "analysis/*.qmd"
+
+website:
+  title: "my-quarto-website"
+  sidebar:
+    style: "docked"
+    search: true
+    contents:
+      - href: index.qmd
+        text: Home
+      - auto: "analysis/*.qmd"
+
+knitr:
+  opts_chunk:
+   max.print: 1000
+
+format:
+  html:
+    theme: cosmo
+    css: assets/styles.css
+    toc: true
+    df-print: paged
+
+execute:
+  cache: true
+#  freeze: auto

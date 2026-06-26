@@ -1,0 +1,15 @@
+data/**
+!data/README.md
+!data/SFARI-Gene_genes_10-23-2025release.csv
+
+output/some_large_file.tsv
+
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+/.quarto/
+/_site/
+*_cache/
+*_files/
