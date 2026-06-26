@@ -1,0 +1,8 @@
+/* css styles */
+pre {
+  max-height: 392px;
+  overflow-y: auto;
+}
+pre[class] {
+  max-height: none;
+}
