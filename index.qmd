@@ -1,19 +1,34 @@
 ---
-title: "My Quarto Website"
+title: "ASD Rare Variant Annotation"
 ---
 
-This is a Quarto website. Visitors will access your analyses through the
-sidebar at left.
+This site is a lightweight landing page for the ASD rare variant annotation
+project. Core computation lives outside Quarto in the repository's analysis,
+output, and figure-reproduction directories.
 
-Include a short description of your project here and perhaps a table or helpful graphic.
+## Project layout
 
-```{r, echo=FALSE, message=FALSE}
-library(tidyverse)
-tribble(
-  ~sample_id, ~age, ~location,
-  "capybara1", 5, "Philadelphia Zoo",
-  "capybara2", 27, "South St"
-)
-```
+- `data/`
+  Path notes and dataset inventory for data stored outside this repository.
+- `analysis/`
+  Scientific modules for scDRS, trajectory inference, AUCell, DD/ID
+  stratification, and integrative tables.
+- `figures/`
+  Manuscript figure reproduction organized by figure number.
+- `output/`
+  Reusable statistical outputs, rendered exports, and manuscript-ready files.
 
-![The exterior of CHOP's rainbow building with a couple of Indego bikes.](assets/chop_bikes.jpg){width=50%}\
+## Workflow
+
+1. Record external data locations in `data/README.md`.
+2. Read source data from your existing external paths.
+3. Run analysis modules in `analysis/`.
+4. Export reusable outputs to `output/`.
+5. Assemble manuscript figures in `figures/figXX/`.
+6. Use Quarto pages only to summarize and display prepared outputs.
+
+## Current project assets
+
+- Quarto stylesheet and static assets: `assets/`
+
+![The exterior of CHOP's rainbow building with a couple of Indego bikes.](assets/chop_bikes.jpg){width=40%}

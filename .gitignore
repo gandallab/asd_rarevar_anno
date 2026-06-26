@@ -1,6 +1,7 @@
 data/**
 !data/README.md
-!data/SFARI-Gene_genes_10-23-2025release.csv
+
+.DS_Store
 
 output/some_large_file.tsv
 

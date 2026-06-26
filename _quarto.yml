@@ -3,17 +3,15 @@ project:
   execute-dir: project
   render:
     - index.qmd
-    - "analysis/*.qmd"
 
 website:
-  title: "my-quarto-website"
+  title: "ASD Rare Variant Annotation"
   sidebar:
     style: "docked"
     search: true
     contents:
       - href: index.qmd
         text: Home
-      - auto: "analysis/*.qmd"
 
 knitr:
   opts_chunk:
