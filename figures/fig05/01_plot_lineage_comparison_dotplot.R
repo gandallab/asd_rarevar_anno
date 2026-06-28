@@ -17,9 +17,9 @@ source(file.path("analysis", "_shared", "cluster_labels.R"))
 datapath  <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/SnMultiome_Wang2025/"
 resultdir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/"
 
-trait_ddid       <- "ASC_Pfdr_ddid_new_DMN"
-trait_noddid     <- "ASC_Pfdr_noddid_new_DMN"
-trait_noddid_new <- "ASC_Pfdr_noddid_perproband_new_DMN"
+trait_ddid       <- "ASC_Pfdr_ddid_new_DMN" # ASD_DH
+trait_noddid     <- "ASC_Pfdr_noddid_new_DMN" # ASD_DL+ASD_DA
+trait_noddid_new <- "ASC_Pfdr_noddid_perproband_new_DMN" # ASD_DA
 
 en_labels <- get_en_labels()
 in_labels <- get_in_labels()
@@ -55,15 +55,7 @@ compute_cluster_comparison <- function(lineage_scDRS_ddid, lineage_scDRS_noddid,
       dplyr::rename(z_noddid = assoc_mcz, p_noddid = assoc_mcp, fdr_noddid = assoc_mcp_fdr),
     by = "cluster"
   ) %>%
-    mutate(
-      enrichment_type = case_when(
-        fdr_ddid < 0.05 & fdr_noddid >= 0.05 ~ "ddid only",
-        fdr_noddid < 0.05 & fdr_ddid >= 0.05 ~ "noddid only",
-        fdr_ddid < 0.05 & fdr_noddid < 0.05  ~ "both",
-        TRUE                                   ~ "neither"
-      ),
-      cluster = as.character(cluster)
-    )
+    mutate(cluster = as.character(cluster))
 }
 
 # ── Helper: prepare combined EN+IN result_data with joint FDR correction ───────
@@ -211,7 +203,7 @@ make_combined_heatmap <- function(res_EN_data, res_IN_data,
   
   p <- ggplot(df_combined, aes(x = x_pos, y = score_type)) +
     geom_tile(aes(fill = z_val), color = "white", linewidth = 0.5) +
-    geom_text(aes(label = sig_label), size = 3, color = "black") +
+    geom_text(aes(label = sig_label), size = 3, color = "white") +
     scale_fill_gradientn(colours = c("#F7F7F7", "#FCBBA1", "#FB6A4A", "#CB181D", "#67000D"),
                         name = "Z score",
                         limits = z_limits) + 
