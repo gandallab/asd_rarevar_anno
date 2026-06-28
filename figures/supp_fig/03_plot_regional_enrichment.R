@@ -2,7 +2,7 @@
 # Burden Analysis — O/E ratio with updated gene sets
 # Gene sets: GZ=26, CP=5, TH=44
 # Variants: PTV + Mis2 + Mis1
-# Cohorts: NoDDID_Proband (N=24,839) | DDID_Proband (N=13,841) | Proband | Sibling (N=9,567)
+# Cohorts: ASD_DA_Proband (N=24,839) | ASD_D_Proband (N=13,841) | ASD_Proband | Sibling (N=9,567)
 # Pairwise: 24 tests total, Bonferroni 0.05/24 = 0.00278
 #   Dim1: region pairs within cohort (12 tests)
 #   Dim2: cohort pairs within region (12 tests)
@@ -28,20 +28,20 @@ gene_sets <- list(
                     "SYT1","TAOK1","TCF7L2","YWHAG","ZMYM2","ZMYND8"))
 )
 
-N <- list(NoDDID_Proband=24839L, DDID_Proband=13841L, Proband=38680L, Sibling=9567L)
+N <- list(ASD_DA_Proband=24839L, ASD_D_Proband=13841L, ASD_Proband=38680L, Sibling=9567L)
 
 
 # ── Load data ─────────────────────────────────────────────────────
 # Adjust paths as needed
-load_data <- function(nodd_path, DDID_Proband_path, full_path, kaplanis_path) {
+load_data <- function(nodd_path, ASD_D_Proband_path, full_path, kaplanis_path) {
   nodd <- read_excel(nodd_path) %>%
-    mutate(count_NoDDID_Proband = PTV_Proband + Mis2_Proband + Mis1_Proband,
+    mutate(count_ASD_DA_Proband = PTV_Proband + Mis2_Proband + Mis1_Proband,
            count_sib  = PTV_Sibling + Mis2_Sibling + Mis1_Sibling)
-  DDID_Proband <- read_excel(DDID_Proband_path) %>%
-    mutate(count_DDID_Proband = PTV_Proband + Mis2_Proband + Mis1_Proband)
+  ASD_D_Proband <- read_excel(ASD_D_Proband_path) %>%
+    mutate(count_ASD_D_Proband = PTV_Proband + Mis2_Proband + Mis1_Proband)
   # Kaplanis has sex-split columns; sum Male+Female for each variant class
   kaplanis <- fread(kaplanis_path) %>%
-    mutate(count_DDID_Proband_kap = PTV_Proband_Male + PTV_Proband_Female +
+    mutate(count_ASD_D_Proband_kap = PTV_Proband_Male + PTV_Proband_Female +
              Mis2_Proband_Male + Mis2_Proband_Female +
              Mis1_Proband_Male + Mis1_Proband_Female)
   full <- fread(full_path) %>%
@@ -49,15 +49,15 @@ load_data <- function(nodd_path, DDID_Proband_path, full_path, kaplanis_path) {
     mutate(mu_total = mu.lof + mu.mis2 + mu.mis1)
   
   nodd %>%
-    select(Gene, count_NoDDID_Proband, count_sib) %>%
-    left_join(DDID_Proband %>% select(Gene, count_DDID_Proband), by="Gene") %>%
-    left_join(kaplanis %>% select(Gene, count_DDID_Proband_kap), by="Gene") %>%
+    select(Gene, count_ASD_DA_Proband, count_sib) %>%
+    left_join(ASD_D_Proband %>% select(Gene, count_ASD_D_Proband), by="Gene") %>%
+    left_join(kaplanis %>% select(Gene, count_ASD_D_Proband_kap), by="Gene") %>%
     left_join(full %>% select(Gene, mu_total, mu.lof, mu.mis2, mu.mis1), by="Gene") %>%
     mutate(
-      count_DDID_Proband = count_DDID_Proband + coalesce(count_DDID_Proband_kap, 0L),
-      count_Proband = count_NoDDID_Proband + count_DDID_Proband
+      count_ASD_D_Proband = count_ASD_D_Proband + coalesce(count_ASD_D_Proband_kap, 0L),
+      count_ASD_Proband = count_ASD_DA_Proband + count_ASD_D_Proband
     ) %>%
-    select(-count_DDID_Proband_kap)
+    select(-count_ASD_D_Proband_kap)
 }
 
 # ── O/E with Garwood CI ───────────────────────────────────────────
@@ -97,9 +97,9 @@ sig_label <- function(p_fdr) {
 # ── Main analysis ─────────────────────────────────────────────────
 run_burden <- function(dat) {
   cohort_cols <- list(
-    NoDDID_Proband     = list(col="count_NoDDID_Proband",     N=N$NoDDID_Proband),
-    DDID_Proband     = list(col="count_DDID_Proband",     N=N$DDID_Proband),
-    Proband = list(col="count_Proband", N=N$Proband),
+    ASD_DA_Proband     = list(col="count_ASD_DA_Proband",     N=N$ASD_DA_Proband),
+    ASD_D_Proband     = list(col="count_ASD_D_Proband",     N=N$ASD_D_Proband),
+    ASD_Proband = list(col="count_ASD_Proband", N=N$ASD_Proband),
     Sibling  = list(col="count_sib",      N=N$Sibling)
   )
   
@@ -141,7 +141,7 @@ run_burden <- function(dat) {
   }) %>% bind_rows()
   
   # Dim2: cohort pairs within region
-  group_pairs <- list(c("Proband","Sibling"), c("DDID_Proband","NoDDID_Proband"), c("DDID_Proband","Sibling"), c("NoDDID_Proband","Sibling"))
+  group_pairs <- list(c("ASD_Proband","Sibling"), c("ASD_D_Proband","ASD_DA_Proband"), c("ASD_D_Proband","Sibling"), c("ASD_DA_Proband","Sibling"))
   dim2 <- lapply(names(gene_sets), function(reg) {  
     lapply(group_pairs, function(pair) {
       ga <- pair[1]; gb <- pair[2]
@@ -182,7 +182,7 @@ fwrite(res$dim2, file = paste0(resultdir, "region_enrichment/Cohort_comparison.c
 
 # ── plot ──────────────────────────────────────────────────────────
 library(ggplot2); library(patchwork); library(dplyr)
-COL_NoDDID_Proband <- "#4472C4"; COL_DDID_Proband <- "#C0392B"; COL_ALL <- "#2E7D32"; COL_SIB <-"#7D3C98"
+COL_ASD_DA_Proband <- "#4472C4"; COL_ASD_D_Proband <- "#C0392B"; COL_ALL <- "#2E7D32"; COL_SIB <-"#7D3C98"
 base_theme <- theme_classic(base_size = 7) +
   theme(axis.line=element_line(colour="black",linewidth=0.4),
         axis.ticks=element_line(colour="black",linewidth=0.4),
@@ -192,11 +192,11 @@ base_theme <- theme_classic(base_size = 7) +
         legend.position="none", panel.grid=element_blank())
 
 region_levels <- c("Thalamus\n(n=44)","Cortical plate\n(n=5)","Germinal zones\n(n=26)")
-cohort_levels <- c("Sibling","Proband","DDID_Proband","NoDDID_Proband")
+cohort_levels <- c("Sibling","ASD_Proband","ASD_D_Proband","ASD_DA_Proband")
 
 # ── Panel 1: total observed DNMs ─────────────────────────────────
 counts_df <- res$oe %>%
-  filter(cohort %in% c("DDID_Proband","NoDDID_Proband","Proband","Sibling")) %>%
+  filter(cohort %in% c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling")) %>%
   select(region, cohort, n_genes, obs) %>%
   mutate(
     region = recode(region,
@@ -206,12 +206,12 @@ counts_df <- res$oe %>%
     region = factor(region, levels = c("Thalamus\n(n=44)",
                                        "Cortical plate\n(n=5)",
                                        "Germinal zones\n(n=26)")),
-    cohort = factor(cohort, levels = c("DDID_Proband","NoDDID_Proband","Proband","Sibling"))
+    cohort = factor(cohort, levels = c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling"))
   )
 
 # ── Panel 2: avg DNMs per gene per sample (×10⁻⁴) ─────────────────
 avg_df <- res$oe %>%
-  filter(cohort %in% c("DDID_Proband","NoDDID_Proband","Proband","Sibling")) %>%
+  filter(cohort %in% c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling")) %>%
   mutate(
     avg    = obs / (n_genes * N) * 1e4,
     avg_cl = qchisq(0.025, 2 * obs)     / 2 / (n_genes * N) * 1e4,
@@ -223,12 +223,12 @@ avg_df <- res$oe %>%
     region  = factor(region, levels = c("Thalamus\n(n=44)",
                                         "Cortical plate\n(n=5)",
                                         "Germinal zones\n(n=26)")),
-    cohort  = factor(cohort, levels = c("DDID_Proband","NoDDID_Proband","Proband","Sibling"))
+    cohort  = factor(cohort, levels = c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling"))
   ) %>%
   select(region, cohort, n_genes, N, obs, exp, avg, avg_cl, avg_ch)
 
 dodge_width <- 0.80
-cohort_levels <- c("DDID_Proband","NoDDID_Proband","Proband","Sibling")  
+cohort_levels <- c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling")  
 n_cohorts <- length(cohort_levels)
 
 avg_df <- avg_df %>%
@@ -241,7 +241,7 @@ avg_df <- avg_df %>%
 # ── Build panels ─────────────────────────────────────────────────
 p1 <- ggplot(counts_df,aes(x=obs,y=region,fill=cohort)) +
   geom_col(position=position_dodge(width=0.80),width=0.72) +
-  scale_fill_manual(values=c("NoDDID_Proband"=COL_NoDDID_Proband,"DDID_Proband"=COL_DDID_Proband,"Proband"=COL_ALL, "Sibling"=COL_SIB)) +
+  scale_fill_manual(values=c("ASD_DA_Proband"=COL_ASD_DA_Proband,"ASD_D_Proband"=COL_ASD_D_Proband,"ASD_Proband"=COL_ALL, "Sibling"=COL_SIB)) +
   scale_x_continuous(breaks=seq(0,800,200),expand=expansion(mult=c(0,0.05))) +
   labs(title="Total DNM count",x="# DNMs in each gene set",y=NULL) +
   base_theme + theme(axis.text.y=element_text(hjust=0,lineheight=0.9))
@@ -251,7 +251,7 @@ p2 <- ggplot(avg_df) +
            position=position_dodge(width=0.80), width=0.72) +
   geom_errorbarh(aes(xmin=avg_cl,xmax=avg_ch,y=y_pos),
                  colour="grey25",width=0.05,linewidth=0.3) +
-  scale_fill_manual(values=c("NoDDID_Proband"=COL_NoDDID_Proband,"DDID_Proband"=COL_DDID_Proband,"Proband"=COL_ALL,"Sibling"=COL_SIB)) +
+  scale_fill_manual(values=c("ASD_DA_Proband"=COL_ASD_DA_Proband,"ASD_D_Proband"=COL_ASD_D_Proband,"ASD_Proband"=COL_ALL,"Sibling"=COL_SIB)) +
   scale_x_continuous(breaks=seq(0,10,2),expand=expansion(mult=c(0,0.08))) +
   labs(title="Avg. DNMs per gene, per sample",
        x=expression("Avg. DNMs per gene, per sample ("%.%10^{-4}*")"),y=NULL) +
@@ -260,17 +260,17 @@ p2 <- ggplot(avg_df) +
 
 legend_data <- data.frame(
   x=c(1, 3, 4.8, 7), y=1,
-  cohort=factor(c("Sibling","Proband","NoDDID_Proband","DDID_Proband"),
-                levels=c("Sibling","Proband","NoDDID_Proband","DDID_Proband")),
+  cohort=factor(c("Sibling","ASD_Proband","ASD_DA_Proband","ASD_D_Proband"),
+                levels=c("Sibling","ASD_Proband","ASD_DA_Proband","ASD_D_Proband")),
   label=c("Sibling (n=9,567)","Proband (n=38,680)",
-          "NoDDID_Proband (n=24,839)","DDID_Proband (n=13,841)"))
+          "ASD_DA_Proband (n=24,839)","ASD_D_Proband (n=13,841)"))
 
 legend_plot <- ggplot(legend_data, aes(x, y, fill=cohort)) +
   geom_tile(width=0.28, height=0.25) +
   geom_text(aes(x=x+0.22, label=label),
             hjust=0, vjust=0.5, size=2) +
-  scale_fill_manual(values=c("NoDDID_Proband"=COL_NoDDID_Proband,"DDID_Proband"=COL_DDID_Proband,
-                             "Proband"=COL_ALL,"Sibling"=COL_SIB)) +
+  scale_fill_manual(values=c("ASD_DA_Proband"=COL_ASD_DA_Proband,"ASD_D_Proband"=COL_ASD_D_Proband,
+                             "ASD_Proband"=COL_ALL,"Sibling"=COL_SIB)) +
   xlim(0.6, 10) + ylim(0.7, 1.3) +
   theme_void() + theme(legend.position="none")
 
@@ -294,7 +294,7 @@ df_oe <- res$oe %>%
     region = factor(region,
       levels = c("GZ", "CP", "THL")),
     cohort = factor(cohort,
-      levels = c("DDID_Proband","NoDDID_Proband","Proband","Sibling")
+      levels = c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling")
     ))
 sig_df <- res$dim2 %>%
   mutate(region = recode(region,
@@ -306,10 +306,10 @@ sig_df <- res$dim2 %>%
   subset(grepl("vs Sibling", comparison), c("comparison","p_fdr","region"))  %>%
   mutate(
     cohort = factor(case_when(
-      grepl("^DDID_Proband",   comparison) ~ "DDID_Proband",
-      grepl("^NoDDID_Proband", comparison) ~ "NoDDID_Proband",
-      grepl("^Proband",        comparison) ~ "Proband"
-    ), levels = c("DDID_Proband", "NoDDID_Proband", "Proband", "Sibling")),
+      grepl("^ASD_D_Proband",   comparison) ~ "ASD_D_Proband",
+      grepl("^ASD_DA_Proband", comparison) ~ "ASD_DA_Proband",
+      grepl("^Proband",        comparison) ~ "ASD_Proband"
+    ), levels = c("ASD_D_Proband", "ASD_DA_Proband", "ASD_Proband", "Sibling")),
     sig_label = case_when(
       p_fdr < 0.001 ~ "***",
       p_fdr < 0.01  ~ "**",
@@ -322,7 +322,7 @@ sig_df <- res$dim2 %>%
   )
 
 df_pair <- res$dim1 %>%
-  filter(cohort %in% c("DDID_Proband", "NoDDID_Proband")) %>%
+  filter(cohort %in% c("ASD_D_Proband", "ASD_DA_Proband")) %>%
   mutate(
     sig_label = case_when(
       p_fdr < 0.001 ~ "***",
@@ -332,7 +332,7 @@ df_pair <- res$dim1 %>%
     ),
     cohort = factor(
       cohort,
-      levels = c("DDID_Proband", "NoDDID_Proband")
+      levels = c("ASD_D_Proband", "ASD_DA_Proband")
     ),
     comparison = recode(
       comparison,
@@ -359,9 +359,9 @@ p_oe <- ggplot(df_oe, aes(x = cohort, y = oe, color = cohort)) +
             aes(x = cohort, y = ci_h + 1, label = sig_label),
             size = 3, color = "black") +
   scale_color_manual(values = c(
-    "DDID_Proband"    = "#C0392B",
-    "NoDDID_Proband"  = "#4472C4",
-    "Proband" = "#2E7D32",
+    "ASD_D_Proband"    = "#C0392B",
+    "ASD_DA_Proband"  = "#4472C4",
+    "ASD_Proband" = "#2E7D32",
     "Sibling" = "#7D3C98"
   )) +
   facet_wrap(~ region, nrow = 1) +
@@ -390,8 +390,8 @@ p_pair <- ggplot(df_pair,
             position = position_dodge(0.5),
             hjust = 0, size = 3, color = "black") +
   scale_color_manual(values = c(
-    "DDID_Proband"    = "#C0392B",
-    "NoDDID_Proband"  = "#4472C4"
+    "ASD_D_Proband"    = "#C0392B",
+    "ASD_DA_Proband"  = "#4472C4"
   )) +
   labs(x = "Relative Risk",
        y = NULL,
