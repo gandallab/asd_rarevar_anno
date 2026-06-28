@@ -1,7 +1,7 @@
 # =============================================================================
 # Burden Analysis — O/E ratio with updated gene sets
 # Gene sets: GZ=26, CP=5, TH=44
-# Variants: PTV + Mis2(MPC>2) + Mis1(MPC 1-2)
+# Variants: PTV + Mis2 + Mis1
 # Cohorts: NoDDID_Proband (N=24,839) | DDID_Proband (N=13,841) | Proband | Sibling (N=9,567)
 # Pairwise: 24 tests total, Bonferroni 0.05/24 = 0.00278
 #   Dim1: region pairs within cohort (12 tests)
