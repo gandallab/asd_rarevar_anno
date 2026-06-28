@@ -50,11 +50,11 @@ quintile_ipc_en <- fread(paste0(aucdir, "scDRS_AUCell_quintile_ipc_en.csv")) %>%
   as.data.frame() %>%
   mutate(gene_set = factor(gene_set, levels = gs_order), Group = factor(Group, levels = timepoint_order))
 
+# lineage correlation plot              
 group_last_ct <- sapply(celltype_groups, function(types) types[length(types)])
 separator_xpos <- sapply(group_last_ct[-length(group_last_ct)], function(ct) {
   which(ct_order == ct) + 0.5
 })
-
 p_overall_ct <- ggplot() +
   geom_tile(data = expand.grid(lineage_label = ct_order, gene_set = gs_order, stringsAsFactors = FALSE),
             aes(x = lineage_label, y = gene_set),
@@ -80,54 +80,10 @@ p_overall_ct <- ggplot() +
   labs(title = "Overall: cell type x gene set") +
   coord_flip()
 
-group_sizes <- sapply(celltype_groups, length)
-separator_ypos_ct <- cumsum(rev(group_sizes)[-length(group_sizes)]) + 0.5
-
-all_tiles_ct <- expand.grid(
-  lineage_label = ct_order,
-  Group = timepoint_order,
-  gene_set = gs_order,
-  stringsAsFactors = FALSE
-) %>%
-  mutate(
-    lineage_label = factor(lineage_label, levels = ct_order),
-    Group = factor(Group, levels = timepoint_order),
-    gene_set = factor(gene_set, levels = gs_order)
-  )
-
-p_heatmap_ct <- ggplot() +
-  geom_tile(data = all_tiles_ct,
-            aes(x = Group, y = lineage_label),
-            fill = "white", color = "grey85", linewidth = 0.2) +
-  geom_tile(data = cor_results %>% filter(!is.na(r_plot) & n_cells > 150),
-            aes(x = Group, y = lineage_label, fill = r_plot),
-            color = "grey85", linewidth = 0.2) +
-  geom_hline(yintercept = separator_ypos_ct, color = "grey40", linewidth = 0.4) +
-  scale_fill_gradientn(
-    colors = c("#2166ac", "#F7F7F7", "#CB181D"),
-    na.value = "white",
-    name = "Spearman r\n(MC FDR < 0.05)"
-  ) +
-  scale_y_discrete(limits = rev(ct_order)) +
-  scale_x_discrete(labels = timepoint_labels) +
-  facet_wrap(~ gene_set, nrow = 1) +
-  theme_classic(base_size = 6) +
-  theme(
-    strip.background = element_blank(),
-    strip.text = element_text(size = 6),
-    axis.text.x = element_text(angle = 0, hjust = 1, size = 6),
-    axis.text.y = element_text(size = 6),
-    axis.title = element_blank(),
-    legend.key.size = unit(0.3, "cm"),
-    legend.text = element_text(size = 6)
-  ) +
-  labs(title = "scDRS x AUCell correlation: cell type level\n(MC-corrected, FDR < 0.05; white = not significant)")
-
-ggsave(paste0(aucdir, "scDRS_AUCell_cor_celltype_heatmap.png"),
-       plot = p_heatmap_ct, width = 8, height = 5, dpi = 300)
 ggsave(paste0(aucdir, "scDRS_AUCell_cor_overall_ct.pdf"),
        plot = p_overall_ct, width = 4, height = 2.5, unit = "in", dpi = 300)
 
+# lineage*group correlation plot                        
 sig_gs_pre <- c("Active zone", "Presynaptic membrane")
 sig_gs_post <- c("Postsynaptic organization")
 
@@ -212,7 +168,12 @@ p_post <- ggplot(cor_post, aes(x = Group, y = lineage_label, fill = r_disease)) 
   )
 
 p_sig_time <- p_pre / (p_post + patchwork::plot_spacer())
+p_ab <- (p_overall_ct + p_sig_time) + patchwork::plot_layout(widths = c(1, 1))
+p_abc <- p_ab / p_quintile_l4_sig + patchwork::plot_layout(heights = c(1.5, 1))
+ggsave(paste0(aucdir, "scDRS_AUCell_combined_abc.png"),
+       plot = p_abc, width = 6, height = 4.7, unit = "in", dpi = 300)
 
+# quintile plot              
 plot_quintile <- function(data, title, timepoint_colors, timepoint_labels,
                           show_x = TRUE, show_strip = TRUE, legend_position = "none") {
   ggplot(data, aes(x = auc_quintile, y = mean_scdrs, color = Group, group = Group)) +
@@ -256,49 +217,10 @@ p_quintile_l4_sig <- plot_quintile(quintile_en_it_l4_sig, "EN-L4-IT", timepoint_
 p_quintile_l5_sig <- plot_quintile(quintile_en_it_l5_sig, "EN-L5-IT", timepoint_colors, timepoint_labels, FALSE, TRUE, "none")
 p_quintile_ipc_sig <- plot_quintile(quintile_ipc_en_sig, "IPC-EN", timepoint_colors, timepoint_labels, TRUE, TRUE, "none")
 p_quintile_newborn_sig <- plot_quintile(quintile_en_newborn_sig, "EN-Newborn", timepoint_colors, timepoint_labels, TRUE, TRUE, "right")
-
-p_quintile_en_it_l4 <- ggplot(quintile_en_it_l4,
-                              aes(x = auc_quintile, y = mean_scdrs, color = Group, group = Group)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey60") +
-  geom_line(linewidth = 0.2) +
-  geom_point(size = 0.5) +
-  geom_errorbar(aes(ymin = mean_scdrs - se_scdrs, ymax = mean_scdrs + se_scdrs),
-                width = 0.1, linewidth = 0.2) +
-  facet_wrap(~ gene_set, nrow = 1, scales = "free_y") +
-  scale_color_manual(values = timepoint_colors, labels = timepoint_labels) +
-  scale_x_continuous(breaks = 0:4, labels = c("Q1", "Q2", "Q3", "Q4", "Q5")) +
-  theme_classic(base_size = 6) +
-  theme(
-    strip.background = element_blank(),
-    strip.text = element_text(size = 6),
-    legend.position = "right",
-    legend.title = element_blank(),
-    legend.key.size = unit(0.3, "cm"),
-    legend.text = element_text(size = 6)
-  ) +
-  labs(
-    x = "AUCell score quintile",
-    y = "Mean scDRS norm_score (+/-SE)",
-    title = "EN-L4-IT: AUCell quintile vs scDRS score across developmental stages"
-  )
-
-ggsave(paste0(aucdir, "scDRS_AUCell_quintile_EN_L4_IT.pdf"),
-       plot = p_quintile_en_it_l4, width = 7, height = 1.5, unit = "in", dpi = 300)
-
+      
 p_quintile_combined <- p_overall_ct +
   (p_quintile_l4_sig / p_quintile_l5_sig / (p_quintile_ipc_sig + p_quintile_newborn_sig)) +
   patchwork::plot_layout(widths = c(1, 1.5))
 
 ggsave(paste0(aucdir, "scDRS_AUCell_quintile_combined.pdf"),
        plot = p_quintile_combined, width = 6.5, height = 5, unit = "in", dpi = 300)
-
-p_ab <- (p_overall_ct + p_sig_time) + patchwork::plot_layout(widths = c(1, 1))
-p_abc <- p_ab / p_quintile_l4_sig + patchwork::plot_layout(heights = c(1.5, 1))
-
-ggsave(paste0(aucdir, "scDRS_AUCell_combined_abc.png"),
-       plot = p_abc, width = 6, height = 4.7, unit = "in", dpi = 300)
-
-p_ac <- p_overall_ct / p_quintile_l4_sig + patchwork::plot_layout(heights = c(1, 1))
-
-ggsave(paste0(aucdir, "scDRS_AUCell_combined_ac.pdf"),
-       plot = p_ac, width = 5, height = 3, unit = "in", dpi = 300)
