@@ -9,6 +9,7 @@ library(viridis)
 library(mgcv)
 library(tidyr)
 library(patchwork)
+source(file.path("analysis", "_shared", "cluster_labels.R"))
 
 # ── Helper functions for GAM smoothing ────────────────────────────────────────
 make_bin_fill <- function(df_fill, flag_col, n_per_bin = 50) {
@@ -439,36 +440,8 @@ plot_comparison <- function(cfg, resultdir,
 
 
 # ── Cell type labels ───────────────────────────────────────────────────────────
-
-en_labels <- c(
-  "1"  = "EN-Newborn",         "2"  = "EN-L4-IT",
-  "3"  = "EN-Newborn",         "4"  = "EN-Non-IT-Immature",
-  "5"  = "EN-IT-Immature",     "6"  = "EN-L2_3-IT",
-  "7"  = "EN-L4-IT-V1",        "8"  = "oRG and tRG",
-  "9"  = "vRG",                "10" = "EN-L2_3_4-IT",
-  "11" = "EN-L6-IT",           "12" = "EN-Newborn",
-  "13" = "EN-L5_6-NP & EN-L5-ET", "14" = "EN-L5-IT",
-  "15" = "EN-L6-CT",           "16" = "EN-Newborn",
-  "17" = "EN-IT-Immature",     "18" = "EN-L4_5-IT",
-  "19" = "EN-L6b",             "21" = "EN-Non-IT-Immature",
-  "22" = "IPC-EN",             "23" = "EN-L6-CT",
-  "24" = "EN-L6b"
-)
-
-in_labels <- c(
-  "1"  = "IN-MGE-PV",          "2"  = "IN-CGE-VIP",
-  "3"  = "IN-MGE-Immature",    "4"  = "vRG",
-  "5"  = "IN-MGE-SST-1",       "6"  = "IN-MGE-Immature",
-  "7"  = "vRG",                "8"  = "vRG",
-  "9"  = "IN-MGE-SST-2",       "10" = "IN-Mix-LAMP5",
-  "11" = "IN-MGE-SST-2",       "12" = "IN-CGE-Immature",
-  "13" = "vRG",                "14" = "IN-dLGE-Immature",
-  "15" = "IN-MGE-PV",          "16" = "IN-MGE-PV",
-  "17" = "oRG and tRG",        "18" = "IN-CGE-SNCG",
-  "19" = "vRG",                "20" = "Tri-IPC",
-  "22" = "IN-CGE-VIP"
-)
-
+en_labels <- get_en_labels()
+in_labels <- get_in_labels()
 
 # ── Comparison config list ─────────────────────────────────────────────────────
 #
@@ -501,39 +474,9 @@ comparisons <- list(
   
   list(score1_label = "GWAS_sex",       score2_label = "RVAS_sex_fdr1",
        score1_name  = "GWAS",           score2_name  = "RVAS",
-       out_label    = "ASC_Pfdr_951genes_GWAS_vs_fdr1"),
-  
-  list(score1_label = "GWAS_sex",         score2_label = "RVAS_ddid_fdr001",
-       score1_name  = "GWAS",             score2_name  = "ddid RVAS",
-       out_label    = "ASC_Pfdr_GWAS_vs_ddid_fdr001"),
-  
-  list(score1_label = "GWAS_sex",         score2_label = "RVAS_noddid_fdr001",
-       score1_name  = "GWAS",             score2_name  = "noddid RVAS",
-       out_label    = "ASC_Pfdr_GWAS_vs_noddid_fdr001"),
-  
-  list(score1_label = "RVAS_ddid_fdr001", score2_label = "RVAS_noddid_fdr001",
-       score1_name  = "ddid RVAS",        score2_name  = "noddid RVAS",
-       out_label    = "ASC_Pfdr_ddid_fdr001_vs_noddid_fdr001")
+       out_label    = "ASC_Pfdr_951genes_GWAS_vs_fdr1")
 )
 
-comparisons_ASD_PGC3 <- list(
-  
-  list(score1_label = "GWAS_sex", score2_label = "RVAS_sex_fdr001",
-       score1_name  = "GWAS",     score2_name  = "RVAS",
-       out_label    = "ASC_Pfdr_253genes_ASD_PGC3_GWAS_vs_fdr001"),
-  
-  list(score1_label = "GWAS_sex", score2_label = "RVAS_sex_fdr01",
-       score1_name  = "GWAS",     score2_name  = "RVAS",
-       out_label    = "ASC_Pfdr_416genes_ASD_PGC3_GWAS_vs_fdr01"),
-  
-  list(score1_label = "GWAS_sex", score2_label = "RVAS_sex_fdr05",
-       score1_name  = "GWAS",     score2_name  = "RVAS",
-       out_label    = "ASC_Pfdr_696genes_ASD_PGC3_GWAS_vs_fdr05"),
-  
-  list(score1_label = "GWAS_sex", score2_label = "RVAS_sex_fdr1",
-       score1_name  = "GWAS",     score2_name  = "RVAS",
-       out_label    = "ASC_Pfdr_951genes_ASD_PGC3_GWAS_vs_fdr1")
-)
 
 # ── Run all comparisons ────────────────────────────────────────────────────────
 resultdir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/"
@@ -548,15 +491,3 @@ for (cfg in comparisons) {
     in_mclust_fix = c("21" = "15")    # IN: mclust22==21 → 15
   )
 }
-
-for (cfg in comparisons_ASD_PGC3) {
-  plot_comparison(
-    cfg           = cfg,
-    resultdir     = resultdir,
-    en_labels     = en_labels,
-    in_labels     = in_labels,
-    en_mclust_fix = c("20" = "22"),   # EN: mclust25==20 → 22
-    in_mclust_fix = c("21" = "15")    # IN: mclust22==21 → 15
-  )
-}
-
