@@ -34,7 +34,7 @@ Each module follows a stepwise numbered layout. Common subdirectory patterns:
 
 Shared utilities used across modules:
 
-- `cluster_labels.R` — EN/IN lineage cluster label maps; used by AUCell group-test scripts and `figures/fig05`
+- `cluster_labels.R` — EN/IN lineage cluster label maps; used by AUCell group-test scripts, `figures/fig01`, and `figures/fig05`
 - `syngo_helpers.R` — SynGO loading, HotNet gene-set construction, AUCell ordering/color helpers; used by AUCell compute scripts and HotNet AUCell figure scripts
 - `scdrs_aucell_helpers.R` — scDRS × AUCell grouping, timepoint, control-column, and lineage-mapping helpers; used by AUCell scDRS correlation scripts
 
