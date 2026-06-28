@@ -168,10 +168,8 @@ p_post <- ggplot(cor_post, aes(x = Group, y = lineage_label, fill = r_disease)) 
   )
 
 p_sig_time <- p_pre / (p_post + patchwork::plot_spacer())
-p_ab <- (p_overall_ct + p_sig_time) + patchwork::plot_layout(widths = c(1, 1))
-p_abc <- p_ab / p_quintile_l4_sig + patchwork::plot_layout(heights = c(1.5, 1))
-ggsave(paste0(aucdir, "scDRS_AUCell_combined_abc.png"),
-       plot = p_abc, width = 6, height = 4.7, unit = "in", dpi = 300)
+ggsave(paste0(aucdir, "scDRS_AUCell_cor_result_sig_time.png"),
+       plot = p_sig_time, width = 3, height = 5, unit = "in", dpi = 300)
 
 # quintile plot              
 plot_quintile <- function(data, title, timepoint_colors, timepoint_labels,
