@@ -13,7 +13,7 @@ scdrsdir <- paste0(resultdir, "WangNature/scDRS/run_v8/score_file/253_genes/")
 # ============================================================
 # Global definitions
 # ============================================================
-gene_module <- read_excel("/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/SynGO/gene_topic_HotNet_category.xlsx")
+gene_module <- read_excel("/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/SynGO/2026.06.30_FINAL-gene-topic-assignment.xlsx")
 gene_module %>%
   count(GO_topic, name = "n_genes") %>%
   arrange(desc(n_genes))
