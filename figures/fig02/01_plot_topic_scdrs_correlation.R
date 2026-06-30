@@ -40,7 +40,7 @@ p_overall_ct <- ggplot() +
             color = "grey85", linewidth = 0.2) +
   geom_text(data = cor_overall_ct %>% filter(sig_label != ""),
             aes(x = lineage_label, y = gene_set, label = sig_label),
-            size = 3, color = "white", vjust = 0.8) +
+            size = 2, color = "white", vjust = 0.8) +
   geom_vline(xintercept = separator_xpos, color = "grey40", linewidth = 0.4) +
   scale_x_discrete(limits = ct_order) +
   scale_y_discrete(limits = rev(gs_order)) +
@@ -58,4 +58,4 @@ p_overall_ct <- ggplot() +
 ggsave(paste0(aucdir, "scDRS_topic_AUCell_cor_overall_ct.png"),
        plot = p_overall_ct, width = 7, height = 4, dpi = 300)
 ggsave(paste0(aucdir, "scDRS_topic_AUCell_cor_overall_ct.pdf"),
-       plot = p_overall_ct, width = 5, height = 2, unit = "in", dpi = 300)
+       plot = p_overall_ct, width = 3, height = 1.5, unit = "in", dpi = 300)
