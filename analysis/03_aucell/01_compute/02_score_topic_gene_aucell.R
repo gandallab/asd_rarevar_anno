@@ -18,15 +18,10 @@ aucdir    <- paste0(resultdir, "WangNature/AUCell/topic/")
 # ============================================================
 # Gene set construction
 # ============================================================
-gene_module <- read_excel("/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/SynGO/gene_topic_HotNet_category.xlsx")
+gene_module <- read_excel("/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/SynGO/2026.06.30_FINAL-gene-topic-assignment.xlsx")
 gene_module %>%
   count(GO_topic, name = "n_genes") %>%
   arrange(desc(n_genes))
-# GO_topic n_genes
-# 1 CHR          155
-# 2 SYN           54
-# 3 MORPH         44
-
 all_genesets <- gene_module %>%
   group_by(GO_topic) %>%
   summarise(genes = list(gene_name), .groups = "drop") %>%
