@@ -82,9 +82,9 @@ raw data here.
 | Directory | Contents |
 |-----------|----------|
 | `fig01/` | scDRS UMAP, lineage z-score, and trajectory plots |
-| `fig02/` | *(scripts in progress)* |
+| `fig02/` | Topic × scDRS correlation |
 | `fig03/` | AUCell proportion heatmap |
-| `fig04/` | Topic × scDRS correlation |
+| `fig04/` | *(scripts in progress)* |
 | `fig05/` | DD/ID gene-set distribution and lineage comparison dotplot |
 | `supp_fig/` | HotNet–scDRS correlation (`01`), HotNet supplementary panels (`02`), regional enrichment burden analysis (`03`), scDRS RVAS vs GWAS group comparison (`04`) |
 
