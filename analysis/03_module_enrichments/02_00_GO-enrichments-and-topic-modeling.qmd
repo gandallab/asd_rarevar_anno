@@ -1,0 +1,463 @@
+---
+title: "ASD-associated module GO and cell-type enrichments"
+description: "Run GO ORA on all significant modules; use topic modeling to synthesize biological themes"
+date: 2026-07-07
+format: html
+---
+
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+```
+
+Load data
+
+```{r env}
+# Gene network assignments
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+
+# Significant ASD modules
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results %>% 
+    mutate(module_label = factor(module_label, levels = unique(.$module_label)))
+```
+
+
+# --- 1) GO enrichment --- #
+
+## 1.1 Load GO terms
+
+```{r load_GO}
+# GO term description to ID mapping
+go_terms <- AnnotationDbi::select(
+    GO.db,
+    keys = keys(GO.db),
+    columns = c("TERM", "ONTOLOGY"),
+    keytype = "GOID"
+) %>% 
+    as_tibble() %>% 
+    clean_names %>% 
+    dplyr::rename(go_id = goid)
+
+# GO ID to gene mapping
+go_mapping <- AnnotationDbi::select(
+    org.Hs.eg.db,
+    keys = keys(org.Hs.eg.db, keytype = "ENSEMBL"),
+    columns = c("GO", "ONTOLOGY"),
+    keytype = "ENSEMBL"
+) %>% 
+    as_tibble() %>% 
+    clean_names %>% 
+    dplyr::rename(go_id = go, ensembl_gene_id = ensembl) %>% 
+    dplyr::select(-evidence)
+
+# Identify GO database background
+go_background <- go_mapping %>% pull(ensembl_gene_id) %>% unique
+```
+
+## 1.2 Prep GO data
+
+```{r prep_GO_data}
+## To save time, precompute gene lists ##
+
+# Precompute study & module gene sets
+df_network_unnested <- df_network_data %>%
+    tidyr::unnest(data)
+
+# Study-level genes (for enrichment backgrounds)
+study_genes_list <- df_network_unnested %>%
+    group_by(study) %>% 
+    summarise(study_genes = list(unique(ensembl_gene_id)), .groups = "drop") %>%
+    deframe()  # named list: study -> genes
+
+# Module-level genes
+module_genes_list <- df_network_unnested %>%
+    group_by(study, module) %>%
+    summarise(module_genes = list(unique(ensembl_gene_id)), .groups = "drop") %>% 
+    filter(module %in% df_stepwise_res$module)
+
+# GO --> genes list (filtered)
+go_genes_list <- go_mapping %>%
+    group_by(go_id) %>%
+    summarise(genes = list(unique(ensembl_gene_id)), .groups = "drop") %>%
+    filter(lengths(genes) >= 5 & lengths(genes) <= 500) %>% # remove GO terms with fewer than 5 genes or greater than 500 genes (removes broad, non-informative terms)
+    deframe()
+```
+
+## 1.3 Run GO ORA
+
+```{r run_GO_ORA}
+## Run ORA on all combinations of modules and GO paths
+
+results <- list()
+
+for(i in seq_len(nrow(module_genes_list))) {
+    study <- module_genes_list$study[i]
+    module <- module_genes_list$module[[i]]
+    module_genes <- module_genes_list$module_genes[[i]]
+    
+    print(paste0("Running GO enrichment on ", module))
+    
+    # Only GO terms that overlap > 1
+    go_overlap <- names(go_genes_list)[map_lgl(go_genes_list, ~ length(intersect(.x, module_genes)) > 1)]
+    
+    for(go_id in go_overlap) {
+        go_genes <- go_genes_list[[go_id]]
+        study_genes <- study_genes_list[[study]]
+        
+        results[[length(results)+1]] <- ORA_fisher(
+            gene_list1 = module_genes,
+            background_list1 = study_genes,
+            gene_list2 = go_genes,
+            background_list2 = go_background,
+            alternative = "greater"
+        ) %>% 
+            mutate(study = study, module = module, go_id = go_id)
+    }
+}
+
+df_go_res <- bind_rows(results)
+
+# Format results
+df_go_res <- df_go_res %>% 
+    left_join(go_terms) %>% 
+    dplyr::select(study, module, go_id, term, ontology, everything()) %>% 
+    group_by(study, module) %>% 
+    mutate(p_adj = p.adjust(p_value, method = "BH"), .before = n_overlap) %>% 
+    mutate(module = factor(module, levels = df_stepwise_res$module)) %>% 
+    arrange(module, p_value) %>% 
+    dplyr::rename(n_module = n_list1, n_pathway = n_list2) %>% 
+    ungroup %>% 
+    mutate(pct_module = n_overlap / n_module * 100)
+```
+
+## 1.4 Export results as object and table for supplement
+
+```{r save_GO_res}
+# Save output as RDS file
+saveRDS(
+    df_go_res,
+    file = file.path(notebook_out_dir, "02_00_sig-mod-GO-enrichments.RDS")
+)
+# Write significant results to Excel
+write_csv(
+    df_go_res %>% filter(p_value < 0.05),
+    path = file.path(notebook_out_dir, "02_00_sig-mod-GO-enrichments-p0.05.csv")
+)
+```
+
+
+# --- 2) Topic modeling --- #
+
+Run topic modeling on all significant GO terms to extract common themes among enrichments, and quantify module relationship to each term. \n NOTE: We have too few documents (modules, n = 29) to run searchK and identify optimal number of modules. We select K = 3 based on qualitiative evaluation of biological themes
+
+## 2.1 Prep sparse module-word matrix
+
+```{r data_prep}
+# Unnest tokens to get GO terms within each module (group)
+df_go_tokens <- df_go_res %>% 
+    dplyr::filter(!is.na(term)) %>% 
+    group_by(module) %>% 
+    # if any term in the module has p_adj < 0.05, keep only those.
+    # else, keep terms where p_value < 0.05
+    dplyr::filter(
+        if (any(p_adj < 0.05)) {
+            p_adj < 0.05
+        } else {
+            p_value < 0.05
+        }
+    ) %>% 
+    ungroup() %>% 
+    unnest_tokens(word, term)
+
+## Create a sparse matrix using only meaningful words that appear at least twice within module
+generic_terms <- c("positive", "negative", "regulation", "response", "protein", "activity",
+                   "pathway", "process", "involved", "cell", 
+                   "binding", "complex", "signaling", "localization", "organization", 
+                   "component", "system", "level", "activation", "production",
+                   "kinase", "membrane", "dependent", "factor", "substrate", "mediated", "type", "formation")
+
+# 1. Identify which modules drop out at n > 2
+modules_all <- unique(df_go_tokens$module)
+modules_at_n2 <- df_go_tokens %>%
+    dplyr::count(module, word) %>%
+    anti_join(stop_words, by = "word") %>% 
+    dplyr::filter(!(word %in% generic_terms)) %>% 
+    dplyr::filter(n > 2) %>%
+    pull(module) %>%
+    unique()
+
+missing_modules <- setdiff(modules_all, modules_at_n2)
+
+# 2. Extract the top words for those specific missing modules
+whitelist_words <- df_go_tokens %>%
+    filter(module %in% missing_modules) %>%
+    dplyr::count(module, word) %>%
+    anti_join(stop_words, by = "word") %>%
+    dplyr::filter(!(word %in% generic_terms)) %>%
+    group_by(module) %>%
+    slice_max(n, n = 3) %>% # Keep top 3 words per missing module
+    pull(word) %>%
+    unique()
+
+# 3. Create the sparse matrix with n > 2 OR Whitelist
+go_sparse <- df_go_tokens %>%
+    dplyr::count(module, word) %>%
+    anti_join(stop_words, by = "word") %>% 
+    dplyr::filter(!(word %in% generic_terms)) %>% 
+    # Logic: Keep if frequency > 2 OR if it's a vital word for the missing modules
+    dplyr::filter(n > 2 | word %in% whitelist_words) %>%
+    cast_sparse(module, word, n)
+```
+
+## 2.2 Select k
+
+```{r select_k, fig.height = 4, fig.width = 7}
+k_range <- 2:10
+k_models <- map(k_range, ~ stm(go_sparse, K = .x, verbose = FALSE, seed = 234))
+
+df_k_metrics <- map2_dfr(k_range, k_models, function(k, m) {
+    tibble(
+        K      = k,
+        semcoh = mean(semanticCoherence(m, go_sparse)),
+        exclus = mean(exclusivity(m))
+    )
+})
+```
+
+## 2.3 Select final topic model
+
+```{r run_topic_model}
+# Fit topic model on K = 3
+topic_model <- k_models[[2]]
+
+# Save fitted topic model for downstream analyses & figures
+saveRDS(topic_model, file = file.path(notebook_out_dir, "02_00_topic-model-K3.RDS"))
+```
+
+## 2.4 Extract topic model metrics
+
+Beta = word-topic probability
+
+```{r extract_beta}
+# Beta = overall probability that a word belongs to a given topic
+
+# Quantify word-topic significance
+df_beta <- tidytext::tidy(topic_model, matrix = "beta") %>%
+    group_by(topic) %>%
+    mutate(
+        # Z-score for how much more likely this word is in this topic vs others
+        z_score = (beta - mean(beta)) / sd(beta),
+        p_value = pnorm(z_score, lower.tail = FALSE),
+        p_adj = p.adjust(p_value, method = "BH")
+    ) %>%
+    ungroup()
+
+# Save for figure
+saveRDS(df_beta, file = file.path(notebook_out_dir, "02_00_topic-word-beta.RDS"))
+```
+
+Gamma = module-topic probability
+
+```{r extract_gamma}
+# Quantify module-topic probabilities & label topics
+df_gamma <- tidytext::tidy(
+    topic_model,
+    matrix = "gamma",
+    document_names = rownames(go_sparse)
+) %>% 
+    dplyr::rename(module = document) %>% 
+    
+    # Calculate z-score and p-value of module association with a given topic compared to other modules
+    group_by(topic) %>% 
+    mutate(
+        z_score = (gamma - mean(gamma)) / sd(gamma),
+        p_value = pnorm(z_score, lower.tail = FALSE),
+        p_adj = p.adjust(p_value, method = "BH")
+    ) %>%
+    ungroup() %>% 
+    
+    # rename modules based on word associations
+    mutate(topic = case_when(
+        topic == 1 ~ "genomic regulation / \nRNA processing",
+        topic == 2 ~ "synaptic transmission / \nion transport",
+        topic == 3 ~ "neuron development / \nmorphogenesis"
+    ),
+    topic = factor(topic, 
+                   levels = c("genomic regulation / \nRNA processing", 
+                              "neuron development / \nmorphogenesis",
+                              "synaptic transmission / \nion transport")
+    ),
+    topic_label = case_when(
+        topic == "synaptic transmission / \nion transport" ~ "SYN",
+        topic == "neuron development / \nmorphogenesis" ~ "MORPH",
+        topic == "genomic regulation / \nRNA processing" ~ "GR"
+    ),
+    topic_color = case_when(
+        topic_label == "SYN" ~ "#4a2377",
+        topic_label == "MORPH" ~ "#0d7d87",
+        topic_label == "GR" ~ "#ea801c"
+    )
+    ) %>% 
+    
+    # Identify if the topic is the top topic for a given module
+    group_by(module) %>% 
+    mutate(top_topic = ifelse(gamma == max(gamma), "yes", "no")) %>% 
+    ungroup
+
+# Save for downstream analyses & figures
+saveRDS(df_gamma, file = file.path(notebook_out_dir, "02_00_topic-module-gamma.RDS"))
+```
+
+
+
+# --- 3) Supplement figures --- #
+
+
+## 3.1 Select k for topic model
+
+```{r plot_select_k, fig.height = 3, fig.width = 3}
+# p_select_k <- df_k_metrics %>%
+#     pivot_longer(-K, names_to = "metric", values_to = "value") %>%
+#     mutate(metric = recode(metric,
+#         semcoh = "Semantic coherence",
+#         exclus = "Exclusivity"
+#     )) %>%
+#     ggplot(aes(x = K, y = value)) +
+#     geom_line(color = "steelblue", linewidth = 0.7) +
+#     geom_point(color = "steelblue", size = 1.5) +
+#     facet_wrap(~ metric, scales = "free_y", nrow = 1) +
+#     scale_x_continuous(breaks = k_range) +
+#     labs(
+#         x     = "Number of topics (K)",
+#         y     = NULL,
+#         title =  NULL #"K selection: semantic coherence & exclusivity"
+#     ) +
+#     theme(
+#         strip.text       = element_text(face = "bold"),
+#         strip.background = element_blank()
+#     )
+
+p_k_tradeoff <- df_k_metrics %>%
+    mutate(color = ifelse(K == 3, "firebrick", "steelblue")) %>% 
+
+    ggplot(aes(x = semcoh, y = exclus, label = K)) +
+    geom_path(color = "grey70", linewidth = 0.5) +
+    geom_point(aes(color = I(color)), size = 2) +
+    ggrepel::geom_text_repel(size = 2.5, min.segment.length = 0) +
+    labs(
+        x     = "Semantic coherence",
+        y     = "Exclusivity",
+        title = "Coherence vs exclusivity tradeoff"
+    )
+p_k_tradeoff
+
+ggsave(
+    filename = file.path(figures_dir, "supplement", "02_02_topic-model-K-selection.png"),
+    plot = p_k_tradeoff,
+    width = 3,
+    height = 3,
+    dpi = 300
+)
+```
+
+
+# --- 4) Tables --- #
+
+## 4.1 Topic model summary
+
+Export the top words per topic across STM metrics (highest prob / FREX / lift / score),
+wide format with one column block per topic (SYN, GR, MORPH).
+
+```{r topic_top_words_table}
+n_top_words <- 7
+lt <- stm::labelTopics(topic_model, n = n_top_words)
+
+# Map each topic number -> theme label via a signature top-probability word
+# (robust to topic renumbering across re-runs)
+topic_theme <- apply(lt$prob, 1, function(words) {
+    if      ("synaptic"          %in% words) "SYN"
+    else if ("acetyltransferase" %in% words) "GR"
+    else if ("morphogenesis"     %in% words) "MORPH"
+    else                                     NA_character_
+})
+topic_for_label <- setNames(seq_along(topic_theme), topic_theme)
+
+# Assemble <LABEL>_<metric> columns in SYN, GR, MORPH order
+df_topic_top_words <- purrr::map_dfc(c("SYN", "GR", "MORPH"), function(label) {
+    k <- topic_for_label[[label]]
+    setNames(
+        list(lt$prob[k, ], lt$frex[k, ], lt$lift[k, ], lt$score[k, ]),
+        paste0(label, c("_prob", "_frex", "_lift", "_score"))
+    ) %>% as_tibble()
+})
+
+write_csv(df_topic_top_words,
+          file.path(notebook_out_dir, "02_00_topic-top-words.csv")
+)
+```
+
+## 4.2 Module-topic probabilities (gamma)
+
+```{r module_gamma}
+df_gamma %>% 
+    dplyr::select(module, topic_label, topic, top_topic, gamma, z_score, p_value, p_adj) %>% 
+    mutate(topic = str_remove(topic, "\\n")) %>% 
+    
+    write_csv(file.path(notebook_out_dir, "02_00_topic-module-gamma.csv"))
+```
+
+
+## DEPR
+
+## 3.2  Word-topic probabilities (beta)
+
+```{r plot_beta, fig.height = 2.5, fig.width = 6.5}
+# Plot module-word associations to define topics
+## Assign colors
+topic_colors <- c(
+    "SYN" = "#4a2377",
+    "GR" = "#ea801c",
+    "MORPH" = "#0d7d87"
+)
+
+p_beta <- df_beta %>% 
+    mutate(topic_label = case_when(
+        topic == 1 ~ "GR",
+        topic == 2 ~ "SYN",
+        topic == 3 ~ "MORPH"
+    )) %>% 
+    group_by(topic) %>% 
+    slice_max(beta, n = 20) %>% # Keep top words per topic
+    ungroup %>% 
+
+    ggplot(aes(x = beta, y = reorder_within(term, beta, topic))) +
+    geom_col(aes(fill = topic_label, alpha = z_score, color = p_adj < 0.05), linewidth = 0.25) +
+    facet_wrap(vars(topic_label), scales = "free_y", nrow = 1) +
+    
+    scale_alpha_continuous(limits = c(0, 15.3), name = "Z-score") +
+    scale_fill_manual(values = topic_colors, guide = "none") +
+    scale_color_manual(values = c("TRUE" = "black", "FALSE" = "gray"), name = "FDR < 0.05") +
+    scale_y_reordered() +
+    scale_x_continuous(breaks = c(0, 0.05, 0.09)) +
+    guides(color = guide_legend(override.aes = list(fill = "white"))) +
+    labs(x = "Beta (word-topic probability)", y = NULL,
+         title = NULL #"Highest probability per topic"
+         ) +
+    theme(legend.key.size = unit(0.3, "cm"),
+          legend.margin = margin(l = -5),
+          panel.grid.major.y = element_blank()
+    )
+p_beta
+```
+

@@ -1,0 +1,9 @@
+broad_category,GR_cluster,cluster_label,n,genes
+chromatin state,1,Histone & DNA modification,31,"ANKRD11, ASH1L, ASXL3, BRD1, BRD4, CREBBP, CXXC1, DNMT3A, EHMT1, EP300, GSE1, JARID2, KANSL1, KDM5B, KDM6B, KMT2A, KMT2C, KMT2D, KMT2E, KMT5B, MBD5, MSL2, NSD1, NSD2, PHF2, SETBP1, SETD1A, SETD1B, SETD2, SETD5, SIN3A"
+chromatin state,2,ATP-dependent chromatin remodeling & genome organization,18,"ADNP, AHDC1, ARID1A, ARID1B, BAZ2A, CHD2, CHD7, CHD8, CTCF, EP400, GATAD2B, HIST1H1E, POGZ, SMARCA2, SMARCA4, SMARCB1, SRCAP, TLK2"
+Transcriptional control,3,Coactivator & general transcriptional machinery,7,"CDK13, MED13, MED13L, TAF4, VEZF1, WAC, YY1"
+Transcriptional control,4,Corepressor & silencing complexes,17,"CIC, NACC1, PHF12, PHF21A, RFX7, SKI, SLTM, SPEN, TBL1XR1, TLE3, ZBTB34, ZBTB7A, ZMYM2, ZMYND8, ZNF292, ZNF644, ZNF865"
+Post-transcriptional & signaling,5,RNA processing & post-transcriptional regulation,17,"CAPRIN1, CELF4, CNOT1, CNOT3, EEF1A2, EFTUD2, GIGYF1, HNRNPD, HNRNPU, INTS6, PUF60, SCAF1, SON, SRSF1, SYNCRIP, TNRC6B, ZCCHC14"
+Post-transcriptional & signaling,6,Ubiquitin-mediated regulation & protein homeostasis,19,"CUL3, DHDDS, EMC7, FBXW11, FBXW7, IRF2BPL, KBTBD6, MAGEL2, PSMC5, PSMD12, QRICH1, RANBP2, SPPL3, TRAF7, TRIM8, TRIP12, UBR5, USP7, WDR26"
+Post-transcriptional & signaling,7,PI3K-mTOR & growth signaling,8,"CSNK2A1, DYRK1A, GSK3B, MTOR, PPP2R5D, PTEN, PTPN11, TSC2"
+Misc,8,Misc / low-annotation,11,"BCAT1, CGREF1, CHAMP1, DIP2C, LEMD3, PPM1D, PRR12, REV3L, TOP3B, XPO1, YLPM1"

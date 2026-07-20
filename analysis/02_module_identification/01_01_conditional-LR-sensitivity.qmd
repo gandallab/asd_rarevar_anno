@@ -1,0 +1,564 @@
+---
+title: "01. Stepwise conditional analysis — binomial (ASD gene binary)"
+description: "(1) Are modules individually associated with ASD risk, and (2) Are modules independently associated with ASD risk?\nOutcome: binary ASD gene status (FDR threshold). Combined across all studies (testing all modules simultaneously)."
+date: 2026-07-06
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "01_module_identification")
+```
+
+## Load data
+
+```{r load_data}
+# Gene network assignments
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+
+# Module eigengene data
+df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
+
+# ASD rare variant data (with Z-score transformation)
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+```
+
+
+# --- 1) Format data --- #
+
+## 1.1 Convert module membership to binary tibble
+
+```{r format_data}
+# Gene network data: Pivot wider & dummy code each column (within network)
+# genes are rows, modules are columns
+# value = 1 if gene is present in module
+df_mods_binary <- df_network_data %>% 
+    mutate(
+        data = map(
+            .x = data,
+            .f = ~ .x %>% 
+                mutate(present = 1) %>% 
+                dplyr::select(module, ensembl_gene_id, present) %>% 
+                distinct() %>% 
+                filter(!is.na(ensembl_gene_id)) %>% # remove unmapped gene IDs (N=0; all gene names were mapped)
+                pivot_wider(
+                    id_cols = ensembl_gene_id, #c(ensembl_gene_id, gene_name),
+                    names_from = module,
+                    values_from = present,
+                    values_fill = 0
+                ) %>%
+                mutate(across(-ensembl_gene_id, as.numeric))
+                #mutate(across(-c(ensembl_gene_id, gene_name), as.numeric)) 
+        )
+    ) %>% 
+    pull(data) %>% 
+    purrr::reduce(., ~ inner_join(.x, .y, by = join_by(ensembl_gene_id))) %>% 
+    dplyr::select(-none) # remove "none" column that was create in Wang data (for unmapped background genes)
+```
+
+## 1.2 Combine module membership with ASD rare variant stats
+
+```{r combine_module_ASD_stats}
+# Merge gene-level module membership data with gene-level ASD metrics (base tibble; the
+# binary ASD-gene outcome is added per FDR threshold inside run_binomial_stepwise())
+df_step_model <- left_join(df_asd_rarevar_zscore %>%
+                               dplyr::rename(gene_name_asd = gene_name),
+                           df_mods_binary,
+                           by = join_by(ensembl_gene_id)
+) %>%
+    na.omit()
+
+print(paste0("N = ",
+             nrow(df_step_model), # 11,324
+             " genes shared across all studies when we join by ensembl_gene_id")
+)
+
+# Get the names of the module columns
+module_cols_all <- df_network_data %>% 
+    unnest(cols = data) %>% 
+    ungroup %>% 
+    filter(module != "none") %>%  # removed regulon "none" from Wang et al data
+    pull(module) %>% 
+    unique
+```
+
+
+
+# --- 2) Stepwise conditional analysis across TADA FDR thresholds --- #
+
+Run the full pipeline (individual pre-screen → conditional forward selection) once at each TADA FDR threshold used to define ASD risk genes (0.001, 0.01, 0.05, 0.1). The primary analysis is FDR < 0.001; the looser thresholds are a robustness check. Both the candidate pre-screen (marginal BH-FDR) and the conditional selection (LRT p) are held at 0.001.
+
+## 2.1 Helper: full binomial stepwise pipeline for one FDR threshold
+
+```{r sensitivity_helper}
+# ======================================================================== #
+# Helper: run full binomial stepwise analysis for a given FDR threshold
+# ======================================================================== #
+
+run_binomial_stepwise <- function(df_base, module_cols, fdr_threshold,
+                                  prescreen_padj = 0.001,
+                                  stepwise_p     = 0.001) {
+
+    df_model <- df_base %>%
+        mutate(asd_gene = as.integer(FDR < fdr_threshold & !FLAG))
+
+    cat("\n--- FDR threshold:", fdr_threshold, "---\n")
+    cat("ASD genes:", sum(df_model$asd_gene), "| Non-ASD genes:", sum(df_model$asd_gene == 0), "\n")
+
+    base_preds    <- c("z_union_cds", "z_log_union_cds")
+    base_formula  <- paste0("asd_gene ~ ", paste(base_preds, collapse = " + "))
+    current_model <- glm(as.formula(base_formula), data = df_model, family = binomial)
+
+    # ---- Pre-screen ----
+    pre_screen <- purrr::map_dfr(
+        .x = module_cols,
+        .f = function(mod) {
+            quoted_mod       <- paste0("`", mod, "`")
+            cand_formula     <- paste0("asd_gene ~ ", paste(c(base_preds, quoted_mod), collapse = " + "))
+
+            cand_model <- tryCatch(
+                glm(as.formula(cand_formula), data = df_model, family = binomial),
+                error = function(e) NULL
+            )
+            if (is.null(cand_model)) return(tibble(module = mod, p_value = Inf, success = FALSE))
+
+            sum_mod <- summary(cand_model)
+            ci_mod  <- suppressMessages(stats::confint(cand_model))
+            row_idx <- which(rownames(sum_mod$coefficients) %in% c(mod, quoted_mod))
+
+            tibble(
+                module  = mod,
+                p_value = sum_mod$coefficients[row_idx, "Pr(>|z|)"],
+                log_or  = sum_mod$coefficients[row_idx, "Estimate"],
+                or      = exp(sum_mod$coefficients[row_idx, "Estimate"]),
+                ci_low  = exp(ci_mod[row_idx, 1]),
+                ci_high = exp(ci_mod[row_idx, 2]),
+                success = TRUE
+            )
+        }
+    ) %>%
+        mutate(p_adj = p.adjust(p_value, method = "BH")) %>%
+        arrange(p_adj)
+
+    candidates <- pre_screen %>%
+        filter(p_adj < prescreen_padj & log_or > 0) %>%
+        pull(module)
+
+    cat("Modules passing pre-screen:", length(candidates), "\n")
+
+    # ---- Stepwise forward selection ----
+    current_preds    <- base_preds
+    remaining_mods   <- candidates
+    selected_mods    <- c()
+
+    repeat {
+        if (length(remaining_mods) == 0) break
+
+        test_res <- purrr::map_dfr(
+            .x = remaining_mods,
+            .f = function(mod) {
+                quoted_mod    <- paste0("`", mod, "`")
+                cand_formula  <- paste0("asd_gene ~ ", paste(c(current_preds, quoted_mod), collapse = " + "))
+
+                cand_model <- tryCatch(
+                    glm(as.formula(cand_formula), data = df_model, family = binomial),
+                    error = function(e) NULL
+                )
+                if (is.null(cand_model)) return(tibble(module = mod, p_value = Inf))
+
+                lrt <- anova(current_model, cand_model, test = "LRT")
+                tibble(module = mod, p_value = lrt$`Pr(>Chi)`[2], model = list(cand_model))
+            }
+        )
+
+        best <- test_res %>% dplyr::slice_min(p_value, n = 1, with_ties = FALSE)
+
+        if (nrow(best) > 0 && best$p_value < stepwise_p) {
+            selected_mods  <- c(selected_mods, best$module)
+            current_preds  <- c(current_preds, paste0("`", best$module, "`"))
+            remaining_mods <- setdiff(remaining_mods, best$module)
+            current_model  <- best$model[[1]]
+            message(paste("Added:", best$module, " (LRT P =", format.pval(best$p_value), ")"))
+        } else {
+            break
+        }
+    }
+
+    cat("Independently associated modules:", length(selected_mods), "\n")
+
+    # ---- Extract results ----
+    final_res <- pre_screen %>%
+        filter(module %in% selected_mods) %>%
+        dplyr::select(module, log_or, or, ci_low, ci_high, p_value, p_adj) %>%
+        arrange(p_adj) %>%
+        mutate(fdr_threshold = fdr_threshold)
+
+    list(
+        input_data    = df_model,
+        glm_results   = final_res,
+        prescreen     = pre_screen,
+        fdr_threshold = fdr_threshold
+    )
+}
+```
+
+## 2.2 Run across TADA FDR thresholds (primary = 0.001)
+
+```{r run_stepwise_all}
+# Run the full pipeline at each TADA FDR threshold; 0.001 is the primary analysis
+fdr_thresholds <- c(0.001, 0.01, 0.05, 0.1)
+
+l_stepwise_all <- purrr::map(
+    .x = fdr_thresholds,
+    .f = ~ run_binomial_stepwise(
+        df_base        = df_step_model,
+        module_cols    = module_cols_all,
+        fdr_threshold  = .x,
+        prescreen_padj = 0.001,   # candidate pre-screen (marginal BH-FDR)
+        stepwise_p     = 0.001    # conditional forward-selection (LRT p)
+    )
+) %>%
+    purrr::set_names(paste0("fdr_", fdr_thresholds))
+```
+
+## 2.3 Check: risk genes lost to the network inner join (FDR < 0.001)
+
+```{r missing_risk_genes_check}
+# Risk genes (FDR < 0.001) in the full TADA dataset vs those retained after the inner join to networks
+risk_genes_full  <- df_asd_rarevar_zscore %>% filter(FDR < 0.001 & !FLAG) %>% pull(ensembl_gene_id)
+risk_genes_model <- df_step_model   %>% filter(FDR < 0.001 & !FLAG) %>% pull(ensembl_gene_id)
+missing_risk_genes <- setdiff(risk_genes_full, risk_genes_model)
+
+cat("Risk genes in full TADA dataset:", length(risk_genes_full), "\n")
+cat("Risk genes in model:", length(risk_genes_model), "\n")
+cat("Missing from model:", length(missing_risk_genes), "\n\n")
+
+# For each missing gene, show which studies include it and what module it falls in
+df_missing_gene_modules <- df_network_data %>%
+    unnest(cols = data) %>%
+    filter(ensembl_gene_id %in% missing_risk_genes) %>%
+    dplyr::select(study, module, ensembl_gene_id, gene_name) %>%
+    distinct() %>%
+    arrange(gene_name, study)
+
+df_missing_gene_modules %>%
+    group_by(gene_name, ensembl_gene_id, study) %>%
+    summarise(modules = str_c(module, collapse = ", "), .groups = "drop") %>%
+    pivot_wider(id_cols = c(gene_name, ensembl_gene_id), names_from = study, values_from = modules) %>%
+    left_join(df_asd_rarevar_zscore %>% dplyr::select(ensembl_gene_id, FDR), by = "ensembl_gene_id") %>%
+    arrange(FDR)
+```
+
+## 2.4 Helper: modules whose hub / TF is an ASD risk gene across TADA thresholds
+
+The ASD risk-gene set is defined at a given TADA FDR threshold, so each model's
+hub/TF-risk-gene annotation is matched to the threshold used to define its outcome.
+
+```{r hub_risk_gene}
+get_risk_gene_hub_modules <- function(fdr_threshold) {
+
+    asd_risk_genes <- df_asd_rarevar_zscore %>%
+        filter(FDR < fdr_threshold & !FLAG) %>%
+        pull(ensembl_gene_id)
+
+    # Regulons where the TF is a risk gene
+    risk_gene_regulons <- df_network_data %>%
+        filter(study %in% c("Wamsley", "Wang")) %>%
+        unnest(cols = c(data)) %>%
+        filter(
+            study %in% c("Wang", "Wamsley") &
+                gene_name == str_remove(module, "_.*") &
+                ensembl_gene_id %in% asd_risk_genes
+        ) %>%
+        pull(module) %>%
+        unique()
+
+    # Co-expression modules where at least one of the top-10 hub genes by kME is a risk gene
+    risk_gene_mods <- df_module_kme %>%
+        filter(module == kME_module) %>%
+        group_by(module) %>%
+        arrange(module, -kME) %>%
+        mutate(rank = row_number()) %>%
+        filter(rank %in% 1:10) %>%
+        filter(ensembl_gene_id %in% asd_risk_genes) %>%
+        pull(module) %>%
+        unique() %>%
+        as.character()
+
+    unique(c(risk_gene_regulons, risk_gene_mods))
+}
+```
+
+## 2.5 Combine and save results
+
+```{r combine_results}
+# Module gene-set sizes; count(study, module) keeps the study each module belongs to
+df_gene_set_size <- df_network_data %>%
+    unnest(cols = c(data)) %>%
+    count(study, module) %>% 
+    dplyr::rename(n_genes_module = n)
+
+# Module display label (from 00_00; hub gene for co-expression, TF +/- for regulons)
+df_module_label_map <- df_network_data %>%
+    unnest(cols = c(data)) %>%
+    distinct(module, module_label)
+
+# Annotate every threshold's results with study, module label, module size, and whether the
+# hub/TF is a risk gene *at that threshold* (risk-gene set matched to each model's FDR cutoff)
+l_stepwise_all <- purrr::map(l_stepwise_all, function(res) {
+    risk_gene_hub_modules <- get_risk_gene_hub_modules(res$fdr_threshold)
+    res$glm_results <- res$glm_results %>%
+        left_join(df_module_label_map, by = join_by(study, module)) %>%
+        left_join(df_gene_set_size,    by = join_by(study, module)) %>%
+        distinct() %>%
+        mutate(hub_is_risk_gene = module %in% risk_gene_hub_modules) %>%
+        dplyr::select(study, module, module_label, n_genes_module, hub_is_risk_gene, everything())
+    res
+})
+
+saveRDS(l_stepwise_all,
+        file = file.path(notebook_out_dir, "01_01_stepwise-binomial-across-TADA-thresholds.RDS")
+)
+```
+
+
+# --- 3) Supplementary combined figure --- #
+
+## 3.0 Prep
+
+```{r supp_prep}
+# Load combined stepwise results across all TADA FDR thresholds
+l_stepwise_all <- readRDS(file.path(notebook_out_dir, "01_01_stepwise-binomial-across-TADA-thresholds.RDS"))
+
+# Long tibble of results across thresholds; fdr_label ordered lenient -> stringent.
+# module_label and n_genes_module are already carried on glm_results (see section 2.5).
+df_sensitivity_combined <- purrr::map_dfr(l_stepwise_all, ~ .x$glm_results) %>%
+    mutate(fdr_label = factor(paste0("FDR < ", fdr_threshold),
+                              levels = paste0("FDR < ", sort(unique(fdr_threshold)))))
+```
+
+## 3.1 Module significance across thresholds
+
+```{r p_heatmap_thresh, fig.height = 4.5, fig.width = 3.5}
+# Which modules are significant at each threshold, and at what p_adj?
+df_threshold_presence <- purrr::map_dfr(
+    .x = l_stepwise_all,
+    .f = ~ .x$glm_results %>% dplyr::select(module, module_label, p_adj),
+    .id = "threshold"
+) %>%
+    mutate(fdr_threshold = as.numeric(str_extract(threshold, "[0-9.]+$"))) %>%
+    complete(nesting(module, module_label), fdr_threshold) %>%  # NA p_adj where module is not significant
+    mutate(
+        fdr_label   = factor(paste0("FDR < ", fdr_threshold),
+                             levels = paste0("FDR < ", sort(unique(fdr_threshold)))),
+        neg_log10_p = if_else(is.na(p_adj), NA_real_, -log10(p_adj))
+    )
+
+
+df_heatmap_plot <- df_threshold_presence %>%
+    mutate(module_label = fct_reorder(module_label, neg_log10_p,
+                                      .fun = ~ sum(.x, na.rm = TRUE)))
+
+p_heatmap_thresh <- df_heatmap_plot %>%
+    ggplot(aes(x = fdr_label, y = module_label, fill = neg_log10_p)) +
+    geom_tile(color = "grey85", linewidth = 0.4) +
+    scale_fill_gradient(
+        low      = "#c6dbef",
+        high     = "#3B4CC0",   # matches the linear-model sensitivity heatmap (01_00 §5.1)
+        na.value = "white",
+        name     = "-log10(FDR)"
+    ) +
+    labs(
+        x     = "ASD gene threshold",
+        y     = NULL,
+        title = NULL#"Module significance across FDR thresholds"
+    ) +
+    theme(
+        axis.text.y       = element_text(size = 5.5),
+        axis.text.x       = element_text(size = 5.5, angle = 30, hjust = 1),
+        legend.position   = "right",
+        legend.key.height = unit(0.4, "cm"),
+        legend.key.width  = unit(0.3, "cm"),
+        legend.margin = margin(l = -5),
+        axis.title      = element_text(size = 6),
+        legend.text     = element_text(size = 5.5),
+        legend.title     = element_text(size = 6),
+        panel.grid   = element_blank(),
+        panel.border = element_blank()
+    )
+
+p_heatmap_thresh
+```
+
+## 3.2 Module OR across thresholds
+
+```{r p_or_thresholds, fig.height = 4.5, fig.width = 3.5}
+p_or_thresholds <- df_sensitivity_combined %>%
+    mutate(module_label = fct_reorder(module_label, or, .fun = max)) %>%
+    
+    ggplot(aes(x = or, y = module_label, color = fdr_label)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey60", linewidth = 0.4) +
+    geom_errorbarh(
+        aes(xmin = ci_low, xmax = ci_high),
+        height    = 0.3,
+        linewidth = 0.4,
+        position  = position_dodge(width = 0.9)
+    ) +
+    geom_point(size = 0.75, position = position_dodge(width = 0.9)) +
+    scale_x_log10() +
+    scale_color_brewer(palette = "Dark2", name = "ASD gene threshold") +
+    labs(
+        x     = "Odds ratio (log scale)",
+        y     = NULL,
+        title = NULL#"Sensitivity: module OR across FDR thresholds"
+    ) +
+    theme(
+        legend.position = "right",
+        legend.margin   = margin(l = -5),
+        axis.text      = element_text(size = 5.5), 
+        axis.title      = element_text(size = 6),
+        legend.text     = element_text(size = 5.5),
+        legend.title     = element_text(size = 6)
+
+    )
+
+p_or_thresholds
+```
+
+## 3.3 Combined figure
+
+```{r supp_combined, fig.height = 4.5, fig.width = 7.09}
+# OR-across-thresholds + significance heatmap only (bubble plot excluded)
+fig_lr_sensitivity <- p_heatmap_thresh + p_or_thresholds +
+    plot_layout(widths = c(4, 5.5), nrow = 1) +
+    plot_annotation(tag_levels = "A") &
+    theme(plot.tag = element_text(face = "bold", size = 10))
+
+fig_lr_sensitivity
+
+ggsave(
+    filename = file.path(figures_dir, "supplement", "01_01_LR-sensitivity-combined.png"),
+    plot = fig_lr_sensitivity,
+    height    = 4.5,
+    width     = 7.09,
+    dpi       = 300
+)
+```
+
+# ---------------------------------------------------------------
+
+# DEPR Bubble plots — faceted by TADA FDR threshold
+
+```{r p_bubble_facet, fig.height = 3, fig.width = 7.09}
+# Bubble-specific prep (relocated from section 3.0)
+# Hub gene per co-expression module (highest kME in its native module)
+hub_gene_map_lr <- df_module_kme %>%
+    filter(module == kME_module) %>%
+    group_by(module) %>%
+    slice_max(kME, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    dplyr::select(module, hub_gene = gene_name)
+
+# Gene set sizes (all networks combined)
+df_gene_set_size_lr <- df_network_data %>%
+    unnest(cols = c(data)) %>%
+    count(module, name = "n_genes_module")
+
+# N ASD genes at each TADA FDR threshold (full TADA dataset, not model inner-join)
+n_asd_by_thresh <- tibble(fdr_threshold = c(0.001, 0.01, 0.05, 0.1)) %>%
+    mutate(
+        n_genes     = map_int(fdr_threshold,
+                              ~ df_asd_rarevar_zscore %>% filter(FDR < .x & !FLAG) %>% nrow()),
+        facet_label = paste0("TADA FDR < ", fdr_threshold, ";\nN=", n_genes, " genes"),
+        facet_label = factor(facet_label, levels = facet_label),
+        fdr_label   = paste0("FDR < ", fdr_threshold),
+        fdr_label   = factor(fdr_label, levels = fdr_label)
+    )
+
+# Module → y_axis_label + topic color look-up (one row per unique module)
+df_lr_labels <- df_sensitivity_combined %>%
+    distinct(module) %>%
+    left_join(hub_gene_map_lr, by = "module") %>%
+    mutate(
+        is_regulon   = is.na(hub_gene),
+        regulon_gene = str_extract(module, "^[^_\\-\\+]+"),
+        regulon_sign = str_extract(str_remove(module, "^[^_\\-\\+]+"), "[\\+\\-]"),
+        y_axis_label = if_else(is_regulon,
+                               paste0(regulon_gene, " (", regulon_sign, ")"),
+                               hub_gene),
+        # ENSG ID leaked through for MARCHF4 in some network versions
+        y_axis_label = if_else(y_axis_label == "43894", "MARCHF4", y_axis_label)
+    ) %>%
+    left_join(df_module_topics_lr, by = "module") %>%
+    dplyr::select(module, y_axis_label, topic_label, topic_color)
+
+df_bubble <- df_sensitivity_combined %>%
+    filter(log_or > 0 & p_adj < 0.001) %>%
+    left_join(df_lr_labels,        by = "module") %>%
+    left_join(df_gene_set_size_lr, by = "module") %>%
+    left_join(n_asd_by_thresh %>% dplyr::select(fdr_threshold, facet_label),
+              by = "fdr_threshold")
+# hub_is_risk_gene comes from the annotated results (see section 2.5)
+
+# Topic legend: map hex color → display label
+topic_map_lr <- df_bubble %>%
+    distinct(topic_color, topic_label) %>%
+    filter(!is.na(topic_color))
+
+p_bubble_facet <- df_bubble %>%
+    ggplot(aes(x = or, y = -log10(p_adj))) +
+    geom_point(
+        aes(fill = topic_color, color = hub_is_risk_gene, size = n_genes_module),
+        shape = 21
+    ) +
+    ggrepel::geom_text_repel(
+        aes(label = y_axis_label),
+        size               = 1.8,
+        min.segment.length = 0,
+        max.overlaps       = Inf,
+        force              = 1.5,
+        box.padding        = 0.3,
+        point.padding      = 0.4,
+        segment.color      = "grey50",
+        segment.size       = 0.2,
+        color              = "black",
+        show.legend        = FALSE
+    ) +
+    scale_x_log10() +
+    scale_fill_identity(
+        guide  = guide_legend(title = NULL,
+                              override.aes = list(size = 3, shape = 21, color = "grey30")),
+        labels = setNames(topic_map_lr$topic_label, topic_map_lr$topic_color)
+    ) +
+    scale_color_manual(
+        values = c("TRUE" = "black", "FALSE" = "grey70"),
+        labels = c("TRUE" = "Yes",   "FALSE" = "No"),
+        name   = "Hub/TF is\nrisk gene"
+    ) +
+    scale_size_continuous(range = c(1, 4), name = "# genes") +
+    facet_wrap(~ facet_label, nrow = 1, scales = "free") +
+    labs(x = "Odds ratio", y = "-log10(FDR)") +
+    theme(
+        strip.text       = element_text(face = "bold", size = 7),
+        strip.background = element_blank(),
+        legend.position  = "bottom",
+        legend.key.size  = unit(0.3, "cm"),
+        legend.box       = "horizontal",
+        legend.direction = "vertical",
+        legend.margin    = margin(t = -5),
+        axis.text      = element_text(size = 5.5), 
+        axis.title      = element_text(size = 6),
+        legend.text     = element_text(size = 5.5),
+        legend.title     = element_text(size = 6)
+    )
+
+p_bubble_facet
+```

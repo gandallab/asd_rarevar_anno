@@ -1,0 +1,420 @@
+---
+title: "BrainSpan developmental trajectories"
+description: "Developmental expression trajectories and prenatal bias of ASD risk genes by GO topic (BrainSpan; Kang et al. 2011 stages, Satterstrom et al. 2020 filtering)"
+date: 2026-07-09
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+```
+
+```{r env}
+# ASD rare variant stats
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# Gene–topic assignments (from 02_02)
+df_gene_assignments   <- read_csv(file.path(notebook_out_dir, "02_02_gene-topic-assignment.csv"))
+```
+
+
+# --- 1) Load and process BrainSpan data --- #
+
+## 1.1 Load BrainSpan data
+
+```{r load_brainspan}
+# Data source: http://www.brainspan.org/static/download.html
+#   → Developmental Transcriptome → "RNA-Seq Gencode v10 summarized to genes"
+# Satterstrom et al. (2020) used this dataset (Li et al., 2018)
+brainspan_dir <- file.path(data_dir, "BrainSpan")
+
+# gene x sample expression matrix
+df_bs_expr    <- read_csv(file.path(brainspan_dir, "expression_matrix.csv"),
+                          col_names = FALSE, show_col_types = FALSE)
+
+# row (gene) metadata
+df_bs_genes   <- read_csv(file.path(brainspan_dir, "rows_metadata.csv"),
+                          show_col_types = FALSE) %>% clean_names()
+
+# column (sample) metadata
+df_bs_samples <- read_csv(file.path(brainspan_dir, "columns_metadata.csv"),
+                          show_col_types = FALSE) %>% clean_names()
+
+# Convert expression tibble to matrix with gene name rows & sample number columns
+mat_expr_full <- as.matrix(df_bs_expr[, -1])
+rownames(mat_expr_full) <- df_bs_genes$gene_symbol
+colnames(mat_expr_full) <- as.character(df_bs_samples$column_num)
+rm(df_bs_expr)
+
+cat("BrainSpan:", nrow(mat_expr_full), "genes ×", ncol(mat_expr_full), "samples loaded\n")
+```
+
+## 1.2 Process samples
+
+Helper functions to convert age to pcw; align with Kang et al., 2011 stages
+
+```{r dev_stage_helpers}
+# Convert BrainSpan age strings ("8 pcw", "4 mos", "2 yrs") to post-conceptional
+# weeks (pcw), assuming full-term birth at 40 pcw
+# 52.18 weeks/year
+parse_bs_age_pcw <- function(age_str) {
+    num  <- as.numeric(str_extract(age_str, "[0-9.]+"))
+    unit <- str_extract(age_str, "[a-z]+")
+    case_when(
+        unit == "pcw" ~ num,
+        unit == "mos" ~ 40 + num * (52.18 / 12),
+        unit == "yrs" ~ 40 + num * 52.18,
+        TRUE          ~ NA_real_
+    )
+}
+
+# Convert pcw to developmental stage
+assign_dev_stage <- function(pcw) {
+    factor(case_when(
+        pcw <   8                      ~ "Embryonic",
+        pcw <  13                      ~ "Early fetal",
+        pcw <  19                      ~ "Early mid-fetal",
+        pcw <  24                      ~ "Late mid-fetal",
+        pcw <  38                      ~ "Late fetal",
+        pcw < (40 +  6 * 52.18 / 12)  ~ "Neonatal and early infancy",
+        pcw < (40 + 12 * 52.18 / 12)  ~ "Late infancy",
+        pcw < (40 +  6 * 52.18)       ~ "Early childhood",
+        pcw < (40 + 12 * 52.18)       ~ "Middle and late childhood",
+        pcw < (40 + 20 * 52.18)       ~ "Adolescence",
+        pcw < (40 + 40 * 52.18)       ~ "Young adulthood",
+        pcw < (40 + 60 * 52.18)       ~ "Middle adulthood",
+        TRUE                          ~ "Late adulthood"
+    ), levels = stage_levels) # stage_levels are defined in setup.R because this is used across scripts
+}
+```
+
+Parse age into pcw, assign developmental stage, & filter
+
+```{r brainspan_sample_filt}
+# 11 neocortical regions as used by Satterstrom et al.
+neocortex_regions <- c(
+    "DFC", "VFC", "MFC", "OFC",
+    "M1C", "S1C", "A1C",
+    "IPC", "STC", "ITC",
+    "V1C"
+)
+
+df_samples_filt <- df_bs_samples %>%
+    
+    # convert age to pcw and assign developmental stage
+    mutate(
+        pcw         = parse_bs_age_pcw(age),
+        dev_stage   = assign_dev_stage(pcw),
+        is_prenatal = pcw < 40
+    ) %>%
+    
+    # filter for neocortical regions
+    filter(structure_acronym %in% neocortex_regions) %>%
+    
+    # indicate if a sample is prenatal or postnatal
+    mutate(
+        epoch        = if_else(is_prenatal, "prenatal", "postnatal"),
+        region_epoch = paste(structure_acronym, epoch, sep = "_") # for gene filtering
+    )
+
+cat(nrow(df_samples_filt), "of", nrow(df_bs_samples), "samples from neocortex\n")
+print(count(df_samples_filt, dev_stage, epoch))
+```
+
+## 1.3 Filter genes
+
+Criteria match Satterstrom et al. 2020
+
+```{r brainspan_gene_filter}
+# Retain genes present at RPKM >= 0.5 in >=80% of samples from at least one
+# neocortical region × epoch combination (matches Satterstrom et al. threshold)
+sample_cols         <- as.character(df_samples_filt$column_num)
+mat_rpkm            <- mat_expr_full[, sample_cols]
+region_epoch_groups <- unique(df_samples_filt$region_epoch)
+
+pct_expressed <- sapply(region_epoch_groups, function(re) {
+    cols <- df_samples_filt$column_num[df_samples_filt$region_epoch == re]
+    rowMeans(mat_rpkm[, as.character(cols), drop = FALSE] >= 0.5)
+})
+expressed_genes <- rownames(pct_expressed)[apply(pct_expressed, 1, max) >= 0.8]
+cat(length(expressed_genes), "genes pass expression threshold\n") # N = 18551
+
+# Convert to log2(RPKM + 1) as in Satterstrom et al.
+mat_log2 <- log2(mat_rpkm[expressed_genes, ] + 1)
+
+# Z-score each gene (row) across all samples: mean 0, SD 1 across full trajectory
+mat_z <- t(scale(t(mat_log2)))
+```
+
+
+# --- 2) Topic gene list developmental trajectories --- #
+
+## 2.1 Helper function: compute relative expression values at each dev stage
+
+```{r helper_function_traj}
+# Compute per-sample mean z-score for a named gene list, returning a long tibble
+# with columns: GO_topic, column_num, mean_z, log10_pcw, dev_stage.
+# background_means is subtracted per sample so trajectories are centered around 0,
+# showing expression relative to the overall background at each timepoint.
+compute_traj_samples <- function(gene_lists, 
+                                 mat_z, 
+                                 df_samples_filt,
+                                 background_means = NULL) {
+    map_dfr(names(gene_lists), function(label) {
+        genes <- intersect(gene_lists[[label]], rownames(mat_z))
+        if (length(genes) < 5) {
+            warning(label, ": fewer than 5 genes in BrainSpan — skipping")
+            return(NULL)
+        }
+        sample_means <- colMeans(mat_z[genes, , drop = FALSE], na.rm = TRUE)
+        if (!is.null(background_means))
+            sample_means <- sample_means - background_means[names(sample_means)]
+        tibble(GO_topic = label, column_num = names(sample_means), mean_z = sample_means)
+    }) %>%
+        left_join(
+            df_samples_filt %>%
+                mutate(column_num = as.character(column_num)) %>%
+                select(column_num, pcw, dev_stage),
+            by = "column_num"
+        ) %>%
+        mutate(log10_pcw = log10(pcw))
+}
+```
+
+## 2.2 Compute expression trajectories for ASD genes in each GO topic
+
+```{r compute_dev_traj}
+# Convert df_gene_assignments to list
+gene_topic_lists <- df_gene_assignments %>%
+    split(.$GO_topic) %>%
+    map(~ pull(.x, gene_name) %>% unique())
+
+# Calculate the mean expression for each sample (background)
+# mat_z defined in section 1.3
+background_sample_means <- colMeans(mat_z, na.rm = TRUE)
+
+# Compute relative expression values at each dev stage
+df_traj_topic <- compute_traj_samples(
+    gene_topic_lists, 
+    mat_z, 
+    df_samples_filt,
+    background_means = background_sample_means
+) %>%
+    group_by(pcw) %>% 
+    mutate(mean_z = as.numeric(scale(mean_z))) %>% # z-score within each timepoint
+    ungroup() %>%
+    mutate(GO_topic = factor(GO_topic, levels = c("SYN", "GR", "MORPH")))
+```
+
+## 2.3 Export trajectories
+
+For Fig 2f
+
+```{r export_traj}
+saveRDS(df_traj_topic, file = file.path(notebook_out_dir, "02_04_brainspan-ASD-gene-trajectories.RDS"))
+```
+
+
+# --- 3) Calculate pre- vs post-natal t-statistic across genes --- #
+
+
+## 3.1 Data prep
+
+```{r tstat_data_prep}
+# Donor-level averaged expression: collapse all regions within each donor to a single
+# mean to avoid collinearity between donor identity and prenatal status.
+
+# Pull donor IDs from filtered data
+donor_ids <- df_samples_filt %>% distinct(donor_id) %>% pull(donor_id)
+
+# Calculate the donor-level average: collapse all regions within each donor
+# to a mean to avoid collinearity between donor identitiy and prenatal status
+# outputs gene x donor matrix
+mat_donor_avg <- sapply(as.character(donor_ids), function(d) {
+    cols <- df_samples_filt %>%
+        filter(donor_id == d) %>%
+        mutate(column_num = as.character(column_num)) %>%
+        pull(column_num)
+    rowMeans(mat_log2[, cols, drop = FALSE], na.rm = TRUE)
+})
+
+# Extract donor-level metadata from df_samples_filt
+df_donor_meta <- df_samples_filt %>%
+    distinct(donor_id, gender, is_prenatal) %>%
+    mutate(donor_id = as.character(donor_id)) %>%
+    slice(match(colnames(mat_donor_avg), donor_id))
+
+cat(ncol(mat_donor_avg), "donors:",
+    sum(df_donor_meta$is_prenatal), "prenatal,",
+    sum(!df_donor_meta$is_prenatal), "postnatal\n")
+```
+
+## 3.2 Pre- vs post-natal t-statistic
+
+For each gene, calculate the t-statistic of pre- vs post-natal expression
+
+```{r calculate_tstat}
+# Prenatal t-statistic: sign convention follows Satterstrom et al. Fig 4C
+# negative t = higher prenatal expression (positively biased prenatal)
+# Include gender as covariate (same as Satterstrom et al)
+compute_prenatal_tstat <- function(gene_expr_vec) {
+    df_fit <- data.frame(
+        expr        = gene_expr_vec,
+        is_prenatal = df_donor_meta$is_prenatal,
+        gender      = df_donor_meta$gender
+    )
+    fit <- tryCatch(lm(expr ~ is_prenatal + gender, data = df_fit), error = function(e) NULL)
+    if (is.null(fit)) return(NA_real_)
+    cs <- coef(summary(fit))
+    if (!"is_prenatalTRUE" %in% rownames(cs)) return(NA_real_)
+    -cs["is_prenatalTRUE", "t value"]
+}
+
+# Prenatal t-statistic per gene: negative = higher prenatal, positive = higher postnatal.
+prenatal_tstats <- apply(mat_donor_avg, 1, compute_prenatal_tstat)
+df_tstats <- tibble(
+    gene_name = names(prenatal_tstats),
+    prenatal_tstat = prenatal_tstats
+) %>% 
+    
+    # add gene assignment info
+    left_join(df_gene_assignments) %>% 
+    mutate(GO_topic = ifelse(is.na(GO_topic), "Background", GO_topic)) %>% 
+    mutate(GO_topic = factor(GO_topic, levels = c("Background", "SYN", "MORPH", "GR")))
+```
+
+## 3.3 Compare GO topic t-stat distribution to background
+
+For each GO topic, test whether its prenatal t-statistic distribution differs from the
+non-ASD background (all genes not assigned to a topic), with a two-sided Wilcoxon
+rank-sum test and Cliff's delta as the effect size.
+
+```{r tstat_comparison}
+# Background = non-ASD genes: every gene with a t-statistic that is not an assigned ASD
+# risk gene. With ~18K background genes the Wilcoxon test is highly powered, so Cliff's
+# delta is the primary quantity — bounded [-1, 1]; > 0 = postnatal-biased vs background
+# (prenatal_tstat: negative = higher prenatal, positive = higher postnatal).
+background_tstats <- df_tstats %>%
+    filter(GO_topic == "Background", !is.na(prenatal_tstat)) %>%
+    pull(prenatal_tstat)
+
+# Wilcoxon rank-sum + Cliff's delta for one gene set vs the background
+compare_to_background <- function(topic_tstats, bg = background_tstats) {
+    wt <- wilcox.test(topic_tstats, bg, alternative = "two.sided")
+    tibble(
+        n_genes      = length(topic_tstats),
+        median_tstat = median(topic_tstats),
+        # Cliff's delta = 2U / (n_topic * n_bg) - 1 = P(topic > bg) - P(topic < bg)
+        cliffs_delta = 2 * as.numeric(wt$statistic) / (length(topic_tstats) * length(bg)) - 1,
+        p_wilcox     = wt$p.value
+    )
+}
+
+df_tstat_comparison <- df_tstats %>%
+    filter(GO_topic != "Background" & !is.na(prenatal_tstat)) %>%
+    group_by(GO_topic) %>%
+    group_modify(~ compare_to_background(.x$prenatal_tstat)) %>%
+    ungroup() %>%
+    mutate(
+        p_adj_wilcox = p.adjust(p_wilcox, method = "BH"),
+        sig_wilcox   = case_when(
+            p_adj_wilcox < 0.001 ~ "***",
+            p_adj_wilcox < 0.01  ~ "**",
+            p_adj_wilcox < 0.05  ~ "*",
+            TRUE                 ~ "ns"
+        ),
+        GO_topic = factor(GO_topic, levels = c("SYN", "GR", "MORPH"))
+    ) %>%
+    arrange(GO_topic)
+
+df_tstat_comparison %>%
+    mutate(across(where(is.double), ~ round(.x, 4))) %>%
+    print()
+```
+
+## 3.4 Export t-stats
+
+```{r export_tstats}
+tstat_data <- list(
+    "gene_tstats" = df_tstats,
+    "topic_vs_background" = df_tstat_comparison
+)
+saveRDS(tstat_data, file.path(notebook_out_dir, "02_04_brainspan-prenatal-tstats.RDS"))
+```
+
+
+
+
+
+
+# DEPR
+
+## Within-topic ASD risk gene trajectories across TADA FDR thresholds
+
+```{r data_asd_traj}
+# ASD risk gene developmental trajectories for four TADA FDR thresholds.
+# Approach: subtract genome-wide per-sample mean z-score first (so y = 0 represents
+# the genome-wide background at each timepoint), then within-pcw z-score the topics
+# only. Background t-statistics: all expressed genes not in any topic gene list at
+# the given FDR threshold (genes can belong to multiple topics; no exclusivity filter).
+
+asd_fdr_thresholds <- c(0.001, 0.01, 0.05, 0.1)
+
+asd_data_list <- map(
+    setNames(asd_fdr_thresholds, paste0("fdr_", asd_fdr_thresholds)),
+    function(fdr_thresh) {
+        asd_genes <- df_asd_rarevar_zscore %>%
+            filter(FDR < fdr_thresh & !FLAG) %>%
+            pull(gene_name) %>%
+            unique()
+        
+        topic_lists_asd <- df_topic_genes %>%
+            filter(hgnc_symbol %in% asd_genes) %>%
+            split(.$topic_label) %>%
+            map(~ pull(.x, hgnc_symbol) %>% unique())
+        
+        bg_tstats <- df_tstats %>%
+            filter(!hgnc_symbol %in% unlist(topic_lists_asd),
+                   !is.na(prenatal_tstat)) %>%
+            pull(prenatal_tstat)
+        
+        background_sample_means <- colMeans(mat_z, na.rm = TRUE)
+        
+        df_traj_topic_raw <- compute_traj_samples(
+            topic_lists_asd, mat_z, df_samples_filt,
+            background_means = background_sample_means
+        ) %>%
+            group_by(pcw) %>%
+            mutate(mean_z = as.numeric(scale(mean_z))) %>%
+            ungroup()
+        
+        list(
+            df_traj_topic  = df_traj_topic_raw %>%
+                mutate(set_label = factor(set_label, levels = c("SYN", "CHR", "MORPH"))),
+            df_traj_background = NULL,
+            background_tstats  = bg_tstats,
+            topic_lists        = topic_lists_asd,
+            n_asd              = length(asd_genes)
+        )
+    }
+)
+
+# Gene count summary across thresholds
+walk2(asd_data_list, names(asd_data_list), function(d, nm) {
+    cat(nm, "— N ASD risk genes:", d$n_asd, "\n")
+    cat("  Topic N:", paste(names(d$topic_lists),
+                            map_int(d$topic_lists, length),
+                            sep = "=", collapse = ", "), "\n")
+    cat("  Background N:", length(d$background_tstats), "\n")
+})
+```
+

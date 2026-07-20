@@ -1,0 +1,5 @@
+broad_category,MORPH_cluster,cluster_label,n,genes
+Transcriptional control,1,Developmental transcription factors,39,"AUTS2, BCL11A, CAMTA1, DEAF1, EBF3, EGR3, FOXG1, FOXP1, FOXP2, HIVEP2, HSF2, MAF, MEF2C, MEIS2, MKX, MYT1L, NFIB, NR2F1, NR3C2, NR4A2, PBX1, POU3F3, RAI1, RFX3, RORB, SATB2, SMAD4, SOX11, SOX5, TBR1, TCF12, TCF20, TCF4, TCF7L2, ZBTB18, ZBTB20, ZEB2, ZFHX3, ZNF536"
+Cytoskeleton,2,Microtubule cytoskeleton & neuronal polarity,9,"ATAT1, BRSK2, DYNC1H1, MAP1A, MAP1B, MARK2, TAOK1, TUBB2A, TUBB3"
+Cytoskeleton,3,Cytoskeletal signaling & axon guidance,14,"ACTB, ACTG1, BCR, BRAF, CTNNB1, MAPK8IP3, NF1, PLXNA1, PPP2R1A, PTCH1, PTK2, RALGAPB, SPTBN1, YWHAG"
+Misc,4,Misc / low-annotation,7,"COL4A3BP, DLL1, EXT1, FBXO11, NAA15, TM9SF4, WDFY3"

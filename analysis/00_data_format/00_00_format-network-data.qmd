@@ -1,0 +1,431 @@
+---
+title: "Format network data"
+description: "Format and combine networks for downstream enrichment analyses (includes bulk & single-cell coexpression networks & regulons)"
+date: 2026-07-06
+format: html
+---
+
+# --- 0) Setup --- #
+
+## 0.0 Load setup & data paths
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r env}
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# List available networks files
+networks_files <- list.files(file.path(data_dir, "networks"))
+networks_paths <- file.path(data_dir, "networks", networks_files)
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "00_data_format")
+```
+
+## 0.1 Helper functions
+
+```{r fix_excel_date_genes}
+# Recover gene symbols that Excel silently coerced into dates.
+#
+# Excel converts symbols like MARCH1, SEPT7, DEC1 into dates, which read back as
+# numeric serials (e.g. 43894 -> 2020-03-04 -> "MARCH4"). Only these date-like
+# gene families coerce, so the original symbol is always the pre-2020 HGNC name
+# (MARCH#/SEPT#/DEC#). That nomenclature also matches the annotations these
+# papers used (Gandal 2022: GENCODE release 25/lift37; Wamsley 2024: Ensembl 88),
+# so recovered symbols align with the rest of each file and map cleanly to
+# Ensembl gene IDs.
+fix_excel_date_genes <- function(gene_vec) {
+    suppressWarnings(serial <- as.numeric(gene_vec))
+    is_serial <- !is.na(serial) & serial > 30000 & serial < 60000  # Excel date range (~1982–2064)
+    if (!any(is_serial)) return(gene_vec)
+
+    # Excel 1900 date system: day 0 = 1899-12-30 (accounts for the 1900 leap-year bug)
+    d      <- as.Date(serial[is_serial], origin = "1899-12-30")
+    day    <- as.integer(format(d, "%d"))
+    family <- c(Mar = "MARCH", Sep = "SEPT", Dec = "DEC")[format(d, "%b")]
+
+    # Rebuild the symbol (e.g. MARCH + 4 -> "MARCH4"); leave any non-gene date untouched
+    recovered <- ifelse(is.na(family), gene_vec[is_serial], paste0(family, day))
+
+    if (anyNA(family)) {
+        warning("fix_excel_date_genes(): ", sum(is.na(family)),
+                " date serial(s) did not decode to a MARCH/SEPT/DEC gene and were left unchanged: ",
+                paste(unique(serial[is_serial][is.na(family)]), collapse = ", "))
+    }
+
+    gene_vec[is_serial] <- recovered
+    gene_vec
+}
+```
+
+
+# --- 1) Load and format network data --- #
+
+## 1.1 Wen et al., 2024
+
+Developmental bulk modules (gene & isoform)
+
+```{r wen}
+# Path to Wen data
+wen_path <- networks_paths[str_detect(networks_paths, "Wen")]
+wen_path <- wen_path[!str_detect(wen_path, "\\~\\$")] # in case the file is open
+
+# Load and format Wen data
+df_wen <- read_xlsx(path = wen_path, sheet = "ST6-1-Module-Genes") %>% 
+    dplyr::rename("ensembl_gene_id" = "gene_id",
+                  "ensembl_transcript_id" = "transcript_id") %>%
+    
+    # Set factor order for modules
+    mutate(mod_numeric = str_remove(assigned_module, "M") %>% as.numeric) %>% 
+    arrange(mod_numeric) %>% 
+    mutate(module = factor(full_dendro_name, levels = unique(.$full_dendro_name)))
+
+# Membership of genes and transcripts to each module
+df_wen_modules <- df_wen %>% 
+    dplyr::select(module, ensembl_gene_id, ensembl_transcript_id, gene_name) %>% 
+    distinct()
+
+print(
+    paste0(
+        "N = ", length(unique(df_wen_modules$ensembl_gene_id)), " genes mapped to ",
+        length(unique(df_wen_modules$module)), " unique co-expression modules"
+    )
+)
+
+# Module eigengene data (keeping separate for formatting purposes)
+df_wen_kme <- df_wen %>% 
+    dplyr::select(module, ensembl_gene_id, ensembl_transcript_id, gene_name, kME, kME_p)
+```
+
+
+## 1.2 Gandal et al., 2022
+
+### 1.2.1 Gene-level
+
+```{r gandal_genes}
+# Path to Gandal data
+gandal_path <- networks_paths[str_detect(networks_paths, "Gandal") & str_detect(networks_paths, "s5")] # Table S6 has enrichment information
+gandal_path <- gandal_path[!str_detect(gandal_path, "\\~\\$")] # in case the file is open
+
+# Load Gandal gene-level pancortical module data
+df_gandal_genes <- read_xlsx(path = gandal_path, sheet = "Gene_Level") %>% 
+    dplyr::rename("gene_name" = "external_gene_name") %>% 
+    
+    # Recover gene symbols that Excel coerced into dates (MARCH/SEPT/DEC families)
+    mutate(gene_name = fix_excel_date_genes(gene_name)) %>%
+
+    # Set module factor order
+    mutate(
+        module_numeric = str_remove(WGCNA_module, "_.*"),
+        module_numeric = str_remove_all(module_numeric, "[^0-9]") %>% as.numeric, .before = 2
+    ) %>% 
+    arrange(module_numeric) %>% 
+    mutate(WGCNA_module = paste0("Gene", WGCNA_module)) %>% 
+    mutate(
+        module = factor(WGCNA_module, levels = unique(.$WGCNA_module)),
+        .before = 1
+    ) %>% 
+    dplyr::select(-c(module_numeric, WGCNA_module))
+
+# Membership of genes to each module
+df_gandal_gene_modules <- df_gandal_genes %>% 
+    dplyr::select(module, ensembl_gene_id, gene_name) %>% 
+    distinct()
+
+print(
+    paste0(
+        "N = ", length(unique(df_gandal_gene_modules$ensembl_gene_id)), " genes mapped to ",
+        length(unique(df_gandal_gene_modules$module)), " unique co-expression modules"
+    )
+)
+
+
+# Module eigengene data (keeping separate for formatting purposes)
+df_gandal_genes_kme <- df_gandal_genes %>% 
+    dplyr::select(module, ensembl_gene_id, gene_name, contains("kME"))
+```
+
+### 1.2.2 Isoform-level
+
+```{r gandal_isoforms}
+# Load Gandal isoform-level pancortical module data
+df_gandal_isoforms <- read_xlsx(path = gandal_path, sheet = "Isoform_Level") %>% 
+    dplyr::rename("gene_name" = "external_gene_name") %>% 
+    
+    # Recover gene symbols that Excel coerced into dates (MARCH/SEPT families)
+    mutate(gene_name = fix_excel_date_genes(gene_name)) %>%
+
+    # Set module factor order
+    mutate(
+        module_numeric = str_remove(WGCNA_module, "_.*"),
+        module_numeric = str_remove_all(module_numeric, "[^0-9]") %>% as.numeric, .before = 2
+    ) %>% 
+    arrange(module_numeric) %>% 
+    mutate(WGCNA_module = paste0("Isoform", WGCNA_module)) %>% 
+    mutate(
+        module = factor(WGCNA_module, levels = unique(.$WGCNA_module)),
+        .before = 1
+    ) %>% 
+    dplyr::select(-c(module_numeric, WGCNA_module))
+
+# Membership of isoforms to each module
+df_gandal_isoform_modules <- df_gandal_isoforms %>% 
+    dplyr::select(module, ensembl_gene_id, ensembl_transcript_id, gene_name) %>% 
+    distinct()
+
+print(
+    paste0(
+        "N = ", length(unique(df_gandal_isoform_modules$ensembl_transcript_id)), " isoforms mapped to ",
+        length(unique(df_gandal_isoform_modules$ensembl_gene_id)), " unique genes in ",
+        length(unique(df_gandal_isoform_modules$module)), " unique co-expression modules"
+    )
+)
+
+# Module eigengene data (keeping separate for formatting purposes)
+df_gandal_isoforms_kme <- df_gandal_isoforms %>% 
+    dplyr::select(module, ensembl_gene_id, ensembl_transcript_id, gene_name, contains("kME"))
+```
+
+
+## 1.3 Wang et al., 2025
+
+Developmental single-cell regulons
+
+```{r wang}
+# Path to Wang data
+wang_path <- networks_paths[str_detect(networks_paths, "Wang") & str_detect(networks_paths, "s13")]
+wang_path <- wang_path[!str_detect(wang_path, "\\~\\$")] # in case the file is open
+
+# Format Wang data to get 'module' (regulon) column and gene membership column
+df_wang_regulons <- read_xlsx(path = wang_path, sheet = "Supplementary Table 13b") %>% 
+    row_to_names(1) %>% 
+    clean_names %>% 
+    
+    # create module and gene_name columns
+    separate_rows(target_genes, sep = ",") %>%
+    dplyr::rename(gene_name = target_genes, module = e_regulon) %>% 
+    dplyr::select(module, gene_name) %>% 
+    distinct()
+
+print(paste0("N = ", length(unique(df_wang_regulons$gene_name)), " unique genes"))
+
+# Query the annotation hub for the human EnsDb version 98 (GRCh38 v32, used in Wang et al)
+hub <- AnnotationHub()
+query(hub, c("EnsDb", "Hsapiens", "98")) # get the access ID
+ebd98 <- hub[["AH75011"]] # query the db with that access ID
+
+# Read in Wang background to get full gene search space (background from Yundan)
+df_wang_background <- read_csv(paste0(data_dir, "Wang2025_background_genes.csv")) %>% 
+    dplyr::select(gene) %>% 
+    dplyr::rename(gene_name = gene) %>% 
+    distinct() %>% # n = 32470
+    
+    # map to ensembl_gene_id
+    mutate(
+        ensembl_gene_id = ensembldb::mapIds(
+            ebd98, # GRCh38 v32 (Ensembl 98)
+            keys = gene_name,
+            keytype = "SYMBOL",
+            column = "GENEID",
+            multiVals = "first"
+        )
+    ) # N = 9 genes unmapped
+
+# Map any remaining gene symbols
+unmapped_genes <- df_wang_background %>% filter(is.na(ensembl_gene_id)) %>% pull(gene_name) # N = 9 IDs did not map
+df_wang_background <- df_wang_background %>% 
+    mutate(ensembl_gene_id = ifelse(
+        gene_name %in% unmapped_genes,
+        ensembldb::mapIds(
+            ebd98, # GRCh38 v32 (Ensembl 98)
+            keys = gene_name %>% str_remove("\\.\\d+$"),
+            keytype = "SYMBOL",
+            column = "GENEID",
+            multiVals = "first"
+        ),
+        ensembl_gene_id
+    )
+    ) %>% # all genes are now mapped
+    distinct()
+
+# Combine unmapped genes with regulon data
+df_wang_regulons <- df_wang_regulons %>% 
+    left_join(df_wang_background, by = join_by(gene_name)) %>% 
+    
+    # add all genes that are in the background but not mapped to regulons
+    bind_rows(
+        df_wang_background %>% 
+            filter(!(gene_name %in% unique(df_wang_regulons$gene_name))) %>% 
+            mutate(module = "none")
+    )
+
+print(
+    paste0(
+        "N = ", length(unique(df_wang_regulons$ensembl_gene_id)), " genes mapped to ",
+        length(unique(df_wang_regulons$module)), " unique regulons"
+    )
+)
+```
+
+
+## 1.4 Wamsley et al., 2024
+
+ASD single-cell regulons
+
+```{r wamsley}
+# Path to Wamsley data
+wamsley_path <- networks_paths[str_detect(networks_paths, "Wamsley")]
+wamsley_path <- wamsley_path[!str_detect(wamsley_path, "\\~\\$")] # in case the file is open
+
+# Regulon membership
+df_wamsley_regulons <- read_xlsx(path = wamsley_path, 
+                                 sheet = "(A)Regulons", 
+                                 skip = 2) %>% 
+    pivot_longer(1:ncol(.), names_to = "module", values_to = "gene_name") %>%
+
+    # Recover gene symbols that Excel coerced into dates (MARCH/SEPT families), before mapping to Ensembl IDs
+    mutate(gene_name = fix_excel_date_genes(gene_name)) %>%
+
+    na.omit %>%
+    arrange(module)
+
+
+# Query the annotation hub for the human EnsDb version 98 (GRCh38 v26; least number of genes dropped this way)
+hub <- AnnotationHub()
+query(hub, c("EnsDb", "Hsapiens", "88")) # get the access ID
+ebd88 <- hub[["AH53715"]] # query the db with that access ID
+
+# Add ensembl_gene_id column
+df_wamsley_regulons <- df_wamsley_regulons %>% 
+    mutate(
+        ensembl_gene_id = ensembldb::mapIds(
+            ebd88, # GRCh38 v26 (Ensembl 88)
+            keys = gene_name,
+            keytype = "SYMBOL",
+            column = "GENEID",
+            multiVals = "first"
+        )
+    ) %>% 
+    
+    # map genes that are still unmapped (only CBWD6) using newer version
+    mutate(ensembl_gene_id = ifelse(is.na(ensembl_gene_id), 
+                                    ensembldb::mapIds(ebd98, 
+                                                      keys = gene_name, 
+                                                      keytype = "SYMBOL", 
+                                                      column = "GENEID", 
+                                                      multiVals = "first"), 
+                                    ensembl_gene_id)
+    )
+
+
+print(
+    paste0(
+        "N = ", length(unique(df_wamsley_regulons$ensembl_gene_id)), " genes mapped to ",
+        length(unique(df_wamsley_regulons$module)), " unique regulons"
+    )
+)
+```
+
+
+
+# --- 2) Combine networks, assign labels, and save --- #
+
+## 2.1 Combine gene networks across studies
+
+```{r combine_networks}
+# Combine all gene networks into one long tibble (nested below, after labeling)
+df_network_data_long <- df_wen_modules %>%
+    mutate(study = "Wen", .before = 1) %>%
+
+    bind_rows(
+        df_gandal_gene_modules %>%
+            mutate(study = "GandalGenes", .before = 1)
+    ) %>%
+
+    bind_rows(
+        df_gandal_isoform_modules %>%
+            mutate(study = "GandalIsoforms", .before = 1)
+    ) %>%
+
+    bind_rows(
+        df_wang_regulons %>%
+            mutate(study = "Wang", .before = 1)
+    ) %>%
+
+    bind_rows(
+        df_wamsley_regulons %>%
+            mutate(study = "Wamsley", .before = 1)
+    )
+```
+
+## 2.2 Module eigengene (kME) data
+
+```{r format_kme}
+# Format module eigengene data
+df_module_kme <- df_wen_kme %>%
+    mutate(study = "Wen", .before = 1) %>%
+    mutate(kME_module = module, .before = kME) %>%
+
+    bind_rows(
+        df_gandal_genes_kme %>%
+            filter(module != "GeneM0_grey") %>%
+            mutate(study = "GandalGenes", .before = 1) %>%
+            pivot_longer(contains("kME"), names_to = "kME_module", values_to = "kME") %>%
+            mutate(kME_module = str_replace(kME_module, "kME", "GeneM"))
+    ) %>%
+
+    bind_rows(
+        df_gandal_isoforms_kme %>%
+            filter(module != "IsoformM0_grey") %>%
+            mutate(study = "GandalIsoforms", .before = 1) %>%
+            pivot_longer(contains("kME"), names_to = "kME_module", values_to = "kME") %>%
+            mutate(kME_module = str_replace(kME_module, "kME", "IsoformM"))
+    )
+```
+
+## 2.3 Module display labels
+
+```{r module_labels}
+# Hub gene (highest self-kME) for each co-expression module. Co-expression
+# studies store each module's self-kME where module == kME_module; regulons have
+# no kME and are labeled by their TF name + activation (+) / repression (-) sign.
+hub_gene_map <- df_module_kme %>%
+    filter(module == kME_module) %>%
+    group_by(module) %>%
+    slice_max(kME, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    dplyr::select(module, hub_gene = gene_name)
+
+# module_label: hub gene for co-expression modules; "TF (+/-)" for regulons
+df_module_labels <- df_network_data_long %>%
+    distinct(module) %>%
+    left_join(hub_gene_map, by = "module") %>%
+    mutate(
+        is_regulon   = is.na(hub_gene),
+        regulon_gene = str_extract(module, "^[^_\\-\\+]+"),
+        regulon_sign = str_extract(str_remove(module, "^[^_\\-\\+]+"), "[\\+\\-]"),
+        module_label = if_else(is_regulon, paste0(regulon_gene, " (", regulon_sign, ")"), hub_gene)
+    ) %>%
+    # one co-expression hub gene reads as a date-coerced number; restore symbol
+    mutate(module_label = if_else(module_label == "43894", "MARCHF4", module_label)) %>%
+    dplyr::select(module, module_label)
+```
+
+## 2.4 Attach labels, nest, and save
+
+```{r save_networks}
+# Attach module_label to each gene, then nest by study
+df_network_data <- df_network_data_long %>%
+    left_join(df_module_labels, by = "module") %>%
+    dplyr::select(study, module, module_label, everything()) %>% 
+    group_by(study) %>%
+    nest()
+
+# Save network, kME, and module-label objects for downstream analyses
+saveRDS(df_network_data,  file = file.path(notebook_out_dir, "00_00_gene-networks-all.RDS"))
+saveRDS(df_module_kme,    file = file.path(notebook_out_dir, "00_00_co-expression-kME.RDS"))
+```

@@ -1,0 +1,113 @@
+---
+title: "Module HotNet enrichment"
+description: "Fisher's exact overlap of each significant module with SynGO HotNet neighborhoods"
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set output directory for this notebook
+notebook_out_dir <- file.path(analysis_dir, "04_MORPH_MEF2C")
+```
+
+```{r env}
+# ASD-associated modules
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results
+
+# Genes in each module
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+
+# Module-topic assignments
+df_gamma <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-module-gamma.RDS"))
+df_top_topic <- df_gamma %>%
+    filter(top_topic == "yes") %>%
+    distinct(module, topic_label)
+
+# SynGO HotNet gene sets (from 03_01)
+hotnet_gene_lists <- readRDS(file.path(analysis_dir, "03_SynGO", "03_01_hotnet-gene-lists.RDS"))
+
+# SynGO ontology background
+syngo_dir <- file.path(data_dir, "SynGO")
+df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
+```
+
+
+# --- 1) Module HotNet enrichment --- #
+
+Modules from the SYN topic are expected to be enriched for synaptic genes. Here we
+test, for each module × HotNet neighborhood combination, whether module genes are
+over-represented among HotNet genes (Fisher's exact test, one-sided). The background
+for each module is the set of genes in that study network.
+
+## 1.1 Run ORA: modules × HotNet neighborhoods
+
+```{r hotnet_module_ora}
+# Background for each module = all genes in that study's network
+# Foreground = module gene set
+# Gene set 2 = HotNet neighborhood genes (same across all studies)
+# BH correction applied within each HotNet neighborhood
+
+syngo_background <- df_syngo_ontol %>%
+    dplyr::select(hgnc_symbol) %>%
+    separate_rows(hgnc_symbol, sep = ", ") %>%
+    mutate(hgnc_symbol = str_trim(hgnc_symbol)) %>%
+    pull(hgnc_symbol) %>% unique()
+
+hotnet_names <- names(hotnet_gene_lists)
+
+df_module_hotnet_ora <- df_stepwise_res %>%
+    dplyr::select(study, module) %>%
+    left_join(df_top_topic) %>%
+    expand_grid(hotnet_group = hotnet_names) %>%
+    mutate(
+        ora_res = pmap(
+            .l = list(..1 = study, ..2 = module, ..3 = hotnet_group),
+            .f = ~ {
+                df_study_tmp <- df_network_data %>%
+                    filter(study == ..1) %>%
+                    unnest(cols = c(data))
+                
+                study_background <- df_study_tmp %>% pull(gene_name) %>% unique()
+                module_genes     <- df_study_tmp %>% filter(module == ..2) %>%
+                    pull(gene_name) %>% unique()
+                hotnet_gs        <- hotnet_gene_lists[[..3]]
+                
+                ORA_fisher(
+                    gene_list1       = module_genes,
+                    gene_list2       = hotnet_gs,
+                    background_list1 = study_background,
+                    background_list2 = syngo_background,
+                    alternative      = "greater"
+                )
+            }
+        )
+    ) %>%
+    unnest(cols = c(ora_res)) %>%
+    group_by(hotnet_group) %>%
+    mutate(p_adj = p.adjust(p_value, method = "BH"), .before = n_overlap) %>%
+    ungroup() %>%
+    dplyr::rename(n_module = n_list1, n_hotnet = n_list2) %>%
+    mutate(pct_module = n_overlap / n_module * 100) %>%
+    arrange(hotnet_group, p_value) %>% 
+    left_join(df_stepwise_res %>% dplyr::select(module, module_label)) %>% 
+    dplyr::select(study, module, module_label, everything())
+
+print(df_module_hotnet_ora %>% filter(p_value < 0.05))
+```
+
+## 1.2 Save results
+
+```{r save_module_hotnet_ora}
+saveRDS(df_module_hotnet_ora, 
+        file.path(notebook_out_dir, "04_00_module-HotNet-ORA.RDS")
+)
+```

@@ -1,0 +1,310 @@
+---
+title: "00b. Format ASD rare variant data"
+description: "Convert the TADA FDR values for each gene to Z-scores to get a normally distributed, continuous metric of ASD association for our model. Also add gene length for regression model covariates."
+date: 2026-07-06
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r env}
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "00_data_format")
+```
+
+
+# --- 1) Load ASD rare variant data --- #
+
+```{r load_data}
+df_asd_rarevar <- read_table(paste0(data_dir, "full_results_wcounts_2025-10-08.txt")) %>% 
+    dplyr::rename(
+        "gene_name" = "gene",
+        "ensembl_gene_id" = "gene_id"
+    ) %>% 
+    
+    # Calculate gene-level Bayes Factor (multiply across variant types)
+    mutate(BF = BF_PTV * BF_Mis2 * BF_Mis1 * BF_DEL * BF_DUP) %>%
+    dplyr::select(gene_name, ensembl_gene_id, FLAG, FDR, BF) %>% 
+    
+    # log-transform and scale Bayes Factor
+    mutate(log_BF = log10(BF)) %>% 
+    mutate(z_log_BF = scale(log_BF)[,1])
+```
+
+
+# --- 2) Convert FDR to Z-score --- #
+
+## 2.1 Write transformation function
+
+[pval = FDR * rank(FDR) / max(FDR) * length(FDR)] \n
+Binarize and combine data (modules + ASD risk) into one wide tibble
+
+```{r transform_p_function}
+fdr_to_p <- function(fdr_vec, bf_vec = NULL, target_max_z = 10) {
+    
+    N <- length(fdr_vec)
+    
+    # --- 1: PREP DATA ---
+    # Ensure bf_vec exists; if NULL, use zeros so it doesn't affect ranking
+    if(is.null(bf_vec)) bf_vec <- rep(0, N)
+    
+    # --- 2: COLLAPSE THE BOTTOM (null genes) ---
+    # Scientific honesty: If log(BF) is 0, get rid of the alphabetical noise (in datasheet Kathryn & Bernie sent)
+    # Force these genes (N = ~7k) to the maximum observed FDR so they group together
+    fdr_clean <- fdr_vec
+    bf_is_zero <- (bf_vec == 0)
+    max_fdr_val <- max(fdr_vec, na.rm = TRUE)
+    fdr_clean[bf_is_zero] <- max_fdr_val
+    
+    # --- 3: CREATE A SORTING KEY ---
+    # Rank by FDR (ascending) then by BF (descending).
+    # Since rank() works on a single vector, we create a combined score:
+    # Low FDR + High BF = top rank
+    # Use -bf_vec because higher BF should result in a smaller rank number
+    combined_score <- fdr_clean + (rank(-bf_vec, ties.method = "average") / (N * 10))
+    
+    # --- 4: GENERATE RANKS ---
+    # ties.method = "average" ensures that if FDR and BF are identical, they get the exact same rank 
+    # (as is the case for the bottom ~7k genes)
+    fdr_ranks <- rank(combined_score, ties.method = "average")
+    
+    # --- 5: TRANSFORM TO P-VALUES ---
+    # Use the rank-based power shift to avoid the "p-value wall" at 0
+    p_target <- pnorm(target_max_z, lower.tail = FALSE)
+    
+    # Create base uniform distribution from ranks
+    p_base <- (fdr_ranks - 0.5) / N
+    
+    # Calculate power shift to anchor the top gene to target_max_z
+    power_shift <- log(p_target) / log(min(p_base))
+    p_vals <- p_base ^ power_shift
+    
+    # --- 6: SAFETY TRUNCATION ---
+    # Cap at 1 - 1e-16 to avoid Z-scores of -Inf
+    p_vals <- pmin(1 - 1e-16, p_vals)
+    
+    return(p_vals)
+}
+```
+
+## 2.2 Quantify ASD risk as FDR-derived Z-score
+
+```{r run_transform_p}
+df_asd_rarevar_zscore <- df_asd_rarevar %>% 
+    
+    # convert FDR to p
+    mutate(p_fdr = fdr_to_p(FDR, bf_vec = log_BF, target_max_z = 10), .after = FDR) %>%
+    
+    # Calculate Z-score from p-value
+    mutate(z_fdr = qnorm(p_fdr, lower.tail = FALSE), .after = p_fdr) %>% 
+    arrange(-z_fdr)
+```
+
+
+# --- 3) Gene info: Get gene lengths and biotype --- #
+
+## 3.1 Load gtf
+
+```{r load_gtf}
+# Load GRCh38 version 29
+url_GRCh38.p14_GENCODE_v29 <- paste0("https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_29/gencode.v29.annotation.gtf.gz")
+gtf_GRCh38.p14_GENCODE_v29 <- rtracklayer::import(url_GRCh38.p14_GENCODE_v29)
+
+# Convert to tibble
+df_GRCh38.p14_GENCODE_v29 <- gtf_GRCh38.p14_GENCODE_v29 %>% as_tibble()
+rm(list="gtf_GRCh38.p14_GENCODE_v29") # clean up to save space
+```
+
+## 3.2 Calculate the length of each gene as the sum of all non-overlapping exon segments 
+
+```{r union_cds_function}
+calculate_union_cds <- function(object) {
+    
+    # If the input object is of GRanges class, convert to tibble
+    object_class <- class(object)[1]
+    if ( object_class == "GRanges" ) {
+        df_genome <- object %>% as_tibble()
+    } else if ( object_class == "tbl_df" ) {
+        df_genome <- object
+    } else { stop("Input object must be of class GRanges or tibble") }
+    
+    # Calculate the union CDS length for each gene by merging non-overlapping segments of all exons
+    df_cds_length <- df_genome %>% 
+        
+        # Filter for exons only
+        filter(type == "exon") %>%
+        
+        # Group by gene ID
+        group_by(gene_id) %>% 
+        dplyr::select(gene_id, exon_id, start, end) %>% 
+        
+        # Merging logic: new block if start/end don't overlap
+        arrange(start) %>% # Arrange tibble in order of start site
+        mutate(end_lag = lag(end, default = 0)) %>% # reference the previous exon's end coordinate
+        mutate(is_new_block = start > end_lag + 1) %>% # marks the start of a non-overlapping region
+        group_by(block_id = cumsum(is_new_block)) %>% # groups overlapping regions together
+        
+        # Summarize to find the merged block boundaries
+        group_by(gene_id, block_id) %>% 
+        summarise(
+            block_start = min(start),
+            block_end = max(end),
+            .groups = "drop"
+        ) %>% 
+        
+        # Calculate the block lengths and final sum
+        group_by(gene_id) %>% 
+        mutate(block_length = block_end - block_start + 1) %>%  # calculate the length of the merged block
+        summarise(union_cds_length = sum(block_length))
+    
+    # Return the data frame
+    return(df_cds_length)
+    
+}
+```
+```{r calc_cds}
+# Calculate union CDS length as the sum of non-overlapping exon lengths
+df_cds_length <- calculate_union_cds(df_GRCh38.p14_GENCODE_v29)
+
+# Combine with biotype for full gene annotation
+df_gene_info <- df_GRCh38.p14_GENCODE_v29 %>% 
+    dplyr::select(gene_id, gene_name, gene_type) %>%
+    left_join(df_cds_length) %>% 
+    distinct() %>%
+    
+    # Rename columns for interpretability
+    dplyr::rename(ensembl_gene_id_version = gene_id,
+                  gene_biotype = gene_type,
+                  gene_name_gtf = gene_name
+    ) %>% 
+    
+    # Get the ensembl_gene_id without the version number
+    mutate(ensembl_gene_id = str_remove(ensembl_gene_id_version, "\\..*$")) %>% 
+    
+    # Transform CDS length for models
+    mutate(
+        z_union_cds = scale(union_cds_length)[,1], # z-score union CDS
+        log_union_cds = log10(union_cds_length + 1), # log10 transform union CDS
+        z_log_union_cds = scale(log_union_cds)[,1] # z-score log10-transformed union CDS
+    )
+```
+
+
+# --- 4) Combine & save --- #
+
+## 4.1 Combine ASD rare variant statistics with gene info
+
+```{r combine_tibbles}
+df_asd_rarevar_zscore <- df_asd_rarevar_zscore %>% 
+    left_join(df_gene_info, by = join_by(ensembl_gene_id))
+```
+
+```{r save}
+saveRDS(df_asd_rarevar_zscore, file = file.path(notebook_out_dir, "00_01_ASD-rarevar-stats.RDS"))
+```
+
+
+# --- 5) Plots --- #
+
+## 5.1 log10(BF) distribution
+
+```{r plot_log10BF, fig.height = 2.5, fig.width = 3}
+p_BF <- df_asd_rarevar_zscore %>% 
+    ggplot(aes(x = log10(BF))) +
+    geom_histogram(aes(y = after_stat(density)),
+                   color = "#2c2c2c", alpha = 0.5) +
+    geom_density(color = "purple") +
+    labs(title = "log10(BF) distribution",
+         x = "log10(BF)")
+p_BF
+# ggsave(
+#     filename = file.path(figures_dir, "00_data_format", "00_01_log10BF_distribution.png"),
+#     plot = p_BF,
+#     height = 2.5,
+#     width = 3,
+#     dpi = 300
+# )
+```
+
+## 5.2 FDR distribution
+
+```{r plot_FDR, fig.height = 2.5, fig.width = 3}
+p_FDR <- df_asd_rarevar_zscore %>% 
+    ggplot(aes(x = FDR)) +
+    geom_histogram(aes(y = after_stat(density)),
+                   color = "#2c2c2c", alpha = 0.5) +
+    geom_density(color = "purple") +
+    labs(title = "FDR distribution",
+         x = "FDR")
+p_FDR
+# ggsave(
+#     filename = file.path(figures_dir, "00_data_format", "00_01_FDR_distribution.png"),
+#     plot = p_FDR,
+#     height = 2.5,
+#     width = 3,
+#     dpi = 300
+# )
+```
+
+## 5.3 P-value distribution
+
+```{r plot_p, fig.height = 2.5, fig.width = 3}
+p_P <- df_asd_rarevar_zscore %>% 
+    ggplot(aes(x = p_fdr)) +
+    geom_histogram(aes(y = after_stat(density)),
+                   color = "#2c2c2c", alpha = 0.5) +
+    geom_density(color = "purple") +
+    labs(title = "FDR-derived P-value distribution",
+         x = "P-value")
+p_P
+# ggsave(
+#     filename = file.path(figures_dir, "00_data_format", "00_01_P_distribution.png"),
+#     plot = p_FDR,
+#     height = 2.5,
+#     width = 3,
+#     dpi = 300
+# )
+```
+
+## 5.4 FDR-derived Z-score distribution
+
+```{r plot_z, fig.height = 2.5, fig.width = 3}
+p_Z <- df_asd_rarevar_zscore %>% 
+    ggplot(aes(x = z_fdr)) +
+    geom_histogram(aes(y = after_stat(density)),
+                   color = "#2c2c2c", alpha = 0.5) +
+    geom_density(color = "purple") +
+    labs(title = "FDR-derived Z-score distribution",
+         x = "Z-score")
+p_Z
+# ggsave(
+#     filename = file.path(figures_dir, "00_data_format", "00_01_Z_distribution.png"),
+#     plot = p_FDR,
+#     height = 2.5,
+#     width = 3,
+#     dpi = 300
+# )
+```
+
+## 5.5 Combine & save
+
+```{r combine_all, fig.height = 5, fig.width = 6}
+p_stats <- (p_BF + p_FDR) / (p_P + p_Z)
+p_stats
+ggsave(
+    filename = file.path(figures_dir, "supplement", "00_01_ASD_stats_distributions.png"),
+    plot = p_stats,
+    height = 5,
+    width = 6,
+    dpi = 300
+)
+```
+
+

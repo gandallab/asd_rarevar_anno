@@ -1,0 +1,202 @@
+---
+title: "MORPH subclustering"
+description: "Define subclusters among MORPH ASD genes (TADA FDR < 0.001) based on similarity of GO term membership"
+date: 2026-07-08
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "04_MORPH_MEF2C")
+```
+
+## 0.1 Load data
+
+```{r load_data}
+# Gene-topic assignments (from notebook 02_02)
+df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+
+# ASD rare variant statistics
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# GO ID to gene mapping
+go_mapping <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = keys(org.Hs.eg.db, keytype = "ENSEMBL"),
+  columns = c("GO", "ONTOLOGY"),
+  keytype = "ENSEMBL"
+) %>%
+    as_tibble() %>%
+    clean_names %>%
+    dplyr::rename(go_id = go, ensembl_gene_id = ensembl) %>%
+    dplyr::select(-evidence) #%>%
+
+    # # filter pathways by size
+    # filter(ontology == "BP") %>%
+    # group_by(go_id) %>%
+    # mutate(n_genes = n_distinct(ensembl_gene_id)) %>%
+    # ungroup() %>%
+    # filter(n_genes > 5 & n_genes < 1000)
+```
+
+
+# --- 1) GO cosine similarity hierarchical subclustering --- #
+
+```{r MORPH_GO_similarity}
+# MORPH ASD gene list (defined in section 1)
+MORPH_genes <- df_gene_assignments %>%
+    filter(GO_topic == "MORPH") %>%
+    pull(gene_name)
+length(MORPH_genes) # N = 69
+
+# Build GO cosine similarity network (build_go_network defined in code/functions/build_go_network.R)
+MORPH_net <- build_go_network(
+    MORPH_genes,
+    go_mapping = go_mapping %>% filter(ontology == "BP"),
+    gene_stats = df_asd_rarevar_zscore
+)
+sim_mat     <- MORPH_net$sim_mat
+genes_no_go <- MORPH_net$no_go
+
+cat("GO similarity matrix:", nrow(sim_mat), "×", ncol(sim_mat), "\n")
+cat("Genes with no GO data:", length(genes_no_go),
+    if (length(genes_no_go) > 0) paste0(" (", paste(genes_no_go, collapse = ", "), ")") else "", "\n")
+```
+
+# --- 2) Hierarchical clustering of similarity matrix --- #
+
+```{r MORPH_cluster}
+# Ward.D2 hierarchical clustering on GO cosine distance
+# Genes not mapped to GO terms are placed by Ward.D2 variance minimization
+dist_mat <- as.dist(1 - sim_mat)
+hc <- hclust(dist_mat, method = "ward.D2")
+
+n_clusters_MORPH  <- 3 # starting point
+cluster_vec_algo <- cutree(hc, k = n_clusters_MORPH)
+
+cat("Cluster sizes (k =", n_clusters_MORPH, "):\n")
+print(sort(table(cluster_vec_algo), decreasing = TRUE))
+cat("\nNo-GO gene placements:\n")
+print(cluster_vec_algo[genes_no_go])
+```
+
+
+# --- 3) Manual overrides --- #
+
+```{r MORPH_manual_overrides}
+# Manually define MORPH subclusters here so every gene is explicitly pinned; these are
+# built off of the GO cosine clustering in 2.3.2 (each gene's final cluster is fixed
+# here, so the result is deterministic and independent of the cutree numbering).
+manual_cluster_overrides <- tribble(
+    ~gene_name,   ~morph_cluster,
+    # === 1) Developmental / identity transcription factors ===
+    "FOXG1",   1L, "FOXP1",   1L, "FOXP2",   1L, "SATB2",  1L, "TBR1",   1L,
+    "SOX5",    1L, "SOX11",   1L, "MEIS2",   1L, "PBX1",   1L, "POU3F3", 1L,
+    "TCF4",    1L, "TCF12",   1L, "TCF20",   1L, "TCF7L2", 1L, "ZEB2",   1L,
+    "NR2F1",   1L, "NR3C2",   1L, "NR4A2",   1L, "RORB",   1L, "RFX3",   1L,
+    "MEF2C",   1L, "MYT1L",   1L, "BCL11A",  1L, "EBF3",   1L, "EGR3",   1L,
+    "NFIB",    1L, "SMAD4",   1L, "DEAF1",   1L, "CAMTA1", 1L, "ZNF536", 1L,
+    "ZFHX3",   1L, "ZBTB18",  1L, "ZBTB20",  1L, "MAF",    1L, "AUTS2",  1L,
+    "RAI1",    1L, "HSF2",    1L, "HIVEP2",  1L, "MKX",    1L,
+    # === 2) Microtubule cytoskeleton & neuronal polarity ===
+    "DYNC1H1", 2L, "MARK2",   2L, "MAP1A",   2L, "MAP1B",  2L, "TUBB2A", 2L,
+    "TUBB3",   2L, "BRSK2",   2L, "TAOK1",   2L, "ATAT1",  2L,
+    # === 3) Cytoskeletal signalling & axon guidance (actin + Rho/Ras signalling) ===
+    "ACTB",    3L, "ACTG1",   3L, "SPTBN1",  3L, "PTK2",   3L, "PLXNA1", 3L,
+    "NF1",     3L, "BCR",     3L, "RALGAPB", 3L, "BRAF",   3L, "MAPK8IP3", 3L,
+    "YWHAG",   3L, "PPP2R1A", 3L, "PTCH1",   3L, "CTNNB1", 3L,
+    # === 4) Misc / low-annotation (not plotted) ===
+    "EXT1",    4L, "COL4A3BP", 4L, "TM9SF4",  4L, "WDFY3",  4L, "DLL1",   4L,
+    "NAA15",   4L, "FBXO11",   4L
+)
+
+# Build cluster_vec directly from the explicit assignment
+cluster_vec <- setNames(manual_cluster_overrides$morph_cluster,
+                        manual_cluster_overrides$gene_name)
+
+# Check if any MORPH gene is left unassigned
+phantom <- setdiff(names(cluster_vec), MORPH_genes)
+if (length(phantom) > 0)
+    cat("NOTE: assigned genes not in MORPH topic:", paste(phantom, collapse = ", "), "\n")
+missing <- setdiff(MORPH_genes, names(cluster_vec))
+if (length(missing) > 0)
+    cat("NOTE:", length(missing), "MORPH genes not explicitly assigned:",
+        paste(missing, collapse = ", "), "\n")
+stopifnot(!any(duplicated(names(cluster_vec))),
+          setequal(names(cluster_vec), MORPH_genes))
+
+# Cluster labels, in the biological order used for the IDs above:
+# transcription factors → microtubule cytoskeleton → cytoskeletal signaling → misc
+cluster_label_map <- tribble(
+    ~morph_cluster, ~cluster_label,                                  ~broad_category,
+    1L,             "Developmental transcription factors",            "Transcriptional control",
+    2L,             "Microtubule cytoskeleton & neuronal polarity",   "Cytoskeleton",
+    3L,             "Cytoskeletal signaling & axon guidance",         "Cytoskeleton",
+    4L,             "Misc / low-annotation",                          "Misc"
+)
+
+cluster_to_label <- setNames(cluster_label_map$cluster_label,  cluster_label_map$morph_cluster)
+cluster_to_broad <- setNames(cluster_label_map$broad_category, cluster_label_map$morph_cluster)
+
+stopifnot(all(cluster_vec %in% cluster_label_map$morph_cluster))
+
+cat("Cluster sizes:\n")
+print(sort(table(cluster_vec)))
+```
+
+
+# --- 4) Export subclusters & save graph object for plot --- #
+
+```{r export_objects}
+MORPH_cluster_assignments <- tibble(
+    gene_name         = names(cluster_vec),
+    MORPH_cluster     = cluster_vec,
+    cluster_label     = cluster_to_label[as.character(cluster_vec)],
+    broad_category    = cluster_to_broad[as.character(cluster_vec)]
+) %>%
+    arrange(MORPH_cluster, gene_name)
+
+MORPH_cluster_assignments %>%
+    group_by(broad_category, MORPH_cluster, cluster_label) %>%
+    summarise(n = n(), genes = paste(gene_name, collapse = ", "), .groups = "drop") %>%
+    arrange(MORPH_cluster) %>%
+    
+    write_csv(file.path(notebook_out_dir, "04_01_MORPH-subcluster-by-GO-similarity.csv"))
+
+# Save graph objects for plot
+saveRDS(MORPH_net, file = file.path(notebook_out_dir, "04_01_MORPH-GO-similarity-graph.RDS"))
+```
+
+
+
+# DEPR 
+
+## Dendrogram
+
+```{r morph_dendrogram, fig.height = 10, fig.width = 7.09}
+cluster_vec <- cluster_vec_algo
+# 2 shades of MORPH teal from light to full color
+morph_color     <- topic_colors[["MORPH"]]
+#cluster_pal_9 <- colorRampPalette(c(morph_color, "#E4F0F1"))(9)  # darkest = cluster 1, lightest = misc (9)
+#cluster_colors <- setNames(cluster_pal_9, seq_len(9))
+cluster_colors <- setNames(c("#0D7D87", "#78B6BC"), seq_len(2))
+
+dend <- as.dendrogram(hc)
+leaf_colors <- cluster_colors[as.character(cluster_vec[labels(dend)])]
+dend <- dend %>%
+    set("labels_cex", 0.45) %>%
+    set("labels_col", leaf_colors) %>%
+    set("branches_lwd", 0.6)
+
+par(mar = c(4, 1, 1, 8))
+plot(dend, horiz = TRUE)
+#abline(v = rev(hc$height)[n_clusters_GR - 1], lty = 2, col = "grey40", lwd = 0.8)
+```

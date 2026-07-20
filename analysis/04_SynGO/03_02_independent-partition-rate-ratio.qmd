@@ -1,0 +1,343 @@
+---
+title: "Run rate ratio calculations on independent SynGO partitions"
+description: "Divide SynGO ontologies into independent partitions and calculate rate ratios"
+date: 2026-07-09
+format: html
+---
+
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "03_SynGO")
+```
+
+## 0.1 Load data
+
+```{r load_data}
+# ASC de novo mutation counts and per-gene background mutation rates
+# Damaging variants: PTV + Mis2 + Mis1; Mis0/Syn/CNV (Del/Dup) excluded
+df_asd_dnm <- read_tsv(
+    file.path(data_dir, "full_results_wcounts_2025-10-08.txt"),
+    show_col_types = FALSE
+) %>%
+    clean_names() %>%
+    select(gene, gene_id, loeuf, mu_lof, mu_mis2, mu_mis1,
+           ptv_proband, ptv_sibling,
+           mis2_proband, mis2_sibling,
+           mis1_proband, mis1_sibling,
+           del_proband, del_sibling,
+           dup_proband, dup_sibling) %>%
+    mutate(
+        mu_total   = mu_lof + mu_mis2 + mu_mis1,
+        dn_proband = ptv_proband + mis2_proband + mis1_proband, #+ del_proband + dup_proband,
+        dn_sibling = ptv_sibling + mis2_sibling + mis1_sibling #+ del_sibling + dup_sibling
+    )
+
+# Load SynGO data
+syngo_dir <- file.path(data_dir, "SynGO")
+df_syngo_annot <- read_xlsx(file.path(syngo_dir, "syngo_annotations.xlsx"))
+df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
+df_syngo_genes <- read_xlsx(file.path(syngo_dir, "syngo_genes.xlsx"))
+```
+
+## 0.2 Constants and helper functions
+
+```{r partition_fig_globals}
+# Cohort sizes (probands: ASC all; siblings: ASC siblings)
+N_pro <- 38680L
+N_sib <-  9567L
+
+# Get all GO/SYNGO IDs that are descendants of a given root ID
+# (traverses parent_id column of the SynGO ontology)
+get_descendants <- function(ontol, root_id) {
+    result <- c()
+    queue  <- root_id
+    while (length(queue) > 0) {
+        cur      <- queue[1]; queue <- queue[-1]
+        children <- ontol$id[!is.na(ontol$parent_id) & ontol$parent_id == cur]
+        result   <- c(result, children)
+        queue    <- c(queue, children)
+    }
+    c(root_id, result)
+}
+
+# Rate ratio + log-scale 95% CI (Poisson approximation, requires dn_pro > 0 & dn_sib > 0)
+calc_rr_ci <- function(dn_pro, dn_sib, n_pro = N_pro, n_sib = N_sib) {
+    rr  <- (dn_pro / n_pro) / (dn_sib / n_sib)
+    se  <- sqrt(1 / dn_pro + 1 / dn_sib)
+    tibble(rate_ratio = rr,
+           rr_ci_l    = exp(log(rr) - qnorm(0.975) * se),
+           rr_ci_h    = exp(log(rr) + qnorm(0.975) * se))
+}
+```
+
+
+# --- 1) Run rate ratio calculation on independent partitions
+
+## 1.1 Classify BP genes into mutually exclusive partitions
+
+```{r syngo_BP_gene_partitions}
+# Descendant GO ID sets for the major CC and BP top-level compartments/processes
+cc_pre_ids  <- get_descendants(df_syngo_ontol, "GO:0098793")   # presynapse
+cc_post_ids <- get_descendants(df_syngo_ontol, "GO:0098794")   # postsynapse
+bp_pre_ids  <- get_descendants(df_syngo_ontol, "SYNGO:presynprocess")
+bp_post_ids <- get_descendants(df_syngo_ontol, "SYNGO:postsynprocess")
+bp_sig_ids  <- get_descendants(df_syngo_ontol, "GO:0099536")   # synaptic signaling
+bp_org_ids  <- get_descendants(df_syngo_ontol, "GO:0050808")   # synapse organization
+# "Oth" = Metabolism & Transport: two direct children of SYNGO:synprocess
+bp_oth_ids  <- c(get_descendants(df_syngo_ontol, "SYNGO:metabolism"),
+                 get_descendants(df_syngo_ontol, "SYNGO:transport"))
+
+# Classify each SynGO gene by which CC top-level compartment(s) it belongs to
+cc_gene_class <- df_syngo_ontol %>%
+    filter(domain == "CC") %>%
+    # Expand paralog-family entries ("GENE1;GENE2") to individual genes before
+    # classifying, so each gene is counted once and deduplication is automatic.
+    separate_rows(hgnc_symbol, sep = ", ") %>%
+    distinct(hgnc_symbol, id) %>%
+    group_by(hgnc_symbol) %>%
+    summarise(
+        in_pre  = any(id %in% cc_pre_ids),
+        in_post = any(id %in% cc_post_ids),
+        .groups = "drop"
+    ) %>%
+    mutate(
+        partition = case_when(
+             in_pre &  in_post ~ "Presynapse +\nPostsynapse",
+             in_pre & !in_post ~ "Presynapse\nonly",
+            !in_pre &  in_post ~ "Postsynapse\nonly",
+            TRUE               ~ "Other CC"
+        )
+    )
+
+# Classify each BP gene into mutually exclusive partitions across all 5 categories
+# (Pre, Post, Sig, Org, Oth). Any combination involving Oth, or 3+ non-Oth categories,
+# is classified as "Other BP" and excluded from the rate ratio analysis —
+# matching Bernie's Table S2 partition scheme exactly.
+bp_gene_class <- df_syngo_ontol %>%
+    filter(domain == "BP") %>%
+    separate_rows(hgnc_symbol, sep = ", ") %>%
+    distinct(hgnc_symbol, id) %>%
+    group_by(hgnc_symbol) %>%
+    summarise(
+        in_pre  = any(id %in% bp_pre_ids),
+        in_post = any(id %in% bp_post_ids),
+        in_sig  = any(id %in% bp_sig_ids),
+        in_org  = any(id %in% bp_org_ids),
+        in_oth  = any(id %in% bp_oth_ids),
+        .groups = "drop"
+    ) %>%
+    mutate(
+        partition = case_when(
+            # Individual compartments.
+            # Pre: Oth co-annotation does NOT exclude — presynapse process takes priority
+            # (e.g. genes also annotated to presynapse-specific metabolism stay in Pre).
+            # Post/Sig/Org: require !in_oth so that Post+Oth, Sig+Oth, Org+Oth combinations
+            # go to Other BP rather than inflating the individual-compartment counts.
+             in_pre & !in_post & !in_sig & !in_org ~ "Presynaptic\nonly",
+            !in_pre &  in_post & !in_sig & !in_org & !in_oth ~ "Postsynaptic\nonly",
+            !in_pre & !in_post &  in_sig & !in_org & !in_oth ~ "Signaling\nonly",
+            !in_pre & !in_post & !in_sig &  in_org & !in_oth ~ "Organization\nonly",
+            !in_pre & !in_post & !in_sig & !in_org &  in_oth ~ "Oth\nonly",
+            # Pairwise among Pre/Post/Sig/Org (all require !in_oth)
+             in_pre &  in_post & !in_sig & !in_org & !in_oth ~ "Pre +\nPost",
+             in_pre & !in_post &  in_sig & !in_org & !in_oth ~ "Pre +\nSig",
+             in_pre & !in_post & !in_sig &  in_org & !in_oth ~ "Pre +\nOrg",
+            !in_pre &  in_post &  in_sig & !in_org & !in_oth ~ "Post +\nSig",
+            !in_pre &  in_post & !in_sig &  in_org & !in_oth ~ "Post +\nOrg",
+            !in_pre & !in_post &  in_sig &  in_org & !in_oth ~ "Sig +\nOrg",
+            # Everything else (3+ categories, or Oth combinations with Post/Sig/Org)
+            TRUE ~ "Other BP"
+        )
+    )
+```
+
+## 1.2 Compute partition rate ratios
+
+```{r partition_rrs}
+compute_partition_rr <- function(gene_class_df, gene_col = "hgnc_symbol",
+                                 exclude_pattern = "^Other") {
+    gene_class_df %>%
+        filter(!grepl(exclude_pattern, partition)) %>%
+        left_join(df_asd_dnm, by = setNames("gene", gene_col)) %>%
+        filter(!is.na(dn_proband)) %>%   # restrict to genes with matched ASC mutation data
+        group_by(partition) %>%
+        summarise(
+            n_genes = n(),
+            dn_pro  = sum(dn_proband, na.rm = TRUE),
+            dn_sib  = sum(dn_sibling, na.rm = TRUE),
+            .groups = "drop"
+        ) %>%
+        # Require at least 5 proband and 1 sibling de novo to compute a stable RR
+        filter(dn_pro >= 5, dn_sib >= 1) %>%
+        mutate(rr_data = map2(dn_pro, dn_sib, calc_rr_ci)) %>%
+        unnest(rr_data) %>%
+        # One-sided binomial test: H0 = proband rate equals sibling rate (RR = 1).
+        # Under H0, dn_pro | (dn_pro + dn_sib) ~ Binomial(n, N_pro/(N_pro+N_sib)).
+        mutate(
+            p_binom = map2_dbl(dn_pro, dn_sib,
+                ~ binom.test(.x, .x + .y,
+                             p         = N_pro / (N_pro + N_sib),
+                             alternative = "greater")$p.value)
+        )
+}
+
+df_cc_rr <- compute_partition_rr(cc_gene_class) %>% mutate(domain = "CC")
+df_bp_rr <- compute_partition_rr(bp_gene_class) %>% mutate(domain = "BP")
+
+df_part_rr <- bind_rows(df_cc_rr, df_bp_rr) %>%
+    arrange(domain, rate_ratio) %>%
+    mutate(partition = factor(partition, levels = unique(partition)))
+```
+
+
+# --- 2) Plot (for supplement) --- #
+
+
+```{r partition_rr_prep}
+# Significance buckets drive both the stars and the colour scale.
+sig_colors <- c("FDR < 0.001" = "#7F0000", "FDR < 0.01" = "#CB181D",
+                "FDR < 0.05"  = "#FCAE91", "ns" = "grey75")
+sig_stars  <- c("FDR < 0.001" = "***", "FDR < 0.01" = "**", "FDR < 0.05" = "*", "ns" = "")
+
+# BP compartments each partition spans ("Other" matches "Oth"); bottom → top on the y-axis
+set_levels      <- c("Other", "Org", "Sig", "Post", "Pre")
+set_patterns    <- c(Pre = "Pre", Post = "Post", Sig = "Sig", Org = "Org", Other = "Oth")
+set_full_labels <- c(Other = "Other BP", Org = "Organization", Sig = "Signaling",
+                     Post  = "Postsynaptic", Pre = "Presynaptic")
+
+# One row per partition: BH-FDR across the 11 BP tests, significance, and plot order
+# (most-enriched at the top).
+df_upset <- df_bp_rr %>%
+    mutate(p_fdr = p.adjust(p_binom, method = "BH"),
+           sig   = cut(p_fdr, c(-Inf, 0.001, 0.01, 0.05, Inf),
+                       labels = names(sig_colors), right = FALSE),
+           star  = sig_stars[as.character(sig)]) %>%
+    arrange(desc(rate_ratio)) %>%
+    mutate(part_x = factor(partition, levels = rev(partition)))
+
+# Long set-membership matrix (partition × compartment) for the left dot panel
+df_matrix <- df_upset %>%
+    distinct(part_x, partition) %>%
+    tidyr::crossing(set = set_levels) %>%
+    mutate(member = str_detect(partition, set_patterns[set]))
+```
+
+```{r partition_rr_upset, fig.width = 4.5, fig.height = 2.5}
+# Left panel: set-membership dot matrix
+p_matrix <- ggplot(df_matrix, aes(x = set, y = part_x, fill = member)) +
+    geom_point(shape = 21, size = 2.5, stroke = 0.2, color = "grey40") +
+    scale_fill_manual(values = c("TRUE" = "grey20", "FALSE" = "grey92"), guide = "none") +
+    scale_x_discrete(labels = set_full_labels, limits = rev(set_levels)) +
+    labs(x = NULL, y = NULL) +
+    theme(axis.text.y  = element_blank(),
+          axis.text.x  = element_text(size = 6.5, angle = 90, hjust = 1),
+          axis.ticks   = element_blank(), panel.grid = element_blank(),
+          panel.border = element_blank(), axis.line = element_blank())
+
+# Right panel: rate-ratio dot plot (dot size = N genes, colour = significance)
+p_dots <- ggplot(df_upset, aes(y = part_x)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.3) +
+    geom_linerange(aes(xmin = rr_ci_l, xmax = rr_ci_h, color = sig), linewidth = 0.4) +
+    geom_point(aes(x = rate_ratio, fill = sig, size = n_genes),
+               shape = 21, color = "grey40", stroke = 0.2) +
+    geom_text(data = filter(df_upset, star != ""),
+              aes(x = rr_ci_h, label = star), hjust = -0.3, size = 2) +
+    scale_fill_manual(values = sig_colors, name = NULL,
+                      guide = guide_legend(ncol = 1, override.aes = list(size = 2.5, color = "grey40", stroke = 0.2))) +
+    scale_color_manual(values = sig_colors, guide = "none") +
+    scale_size_continuous(range = c(1.5, 4), name = "N genes",
+                          guide = guide_legend(ncol = 1, override.aes = list(fill = "grey60", color = "grey40", stroke = 0.2))) +
+    scale_x_log10(breaks = c(1, 2, 5, 10), expand = expansion(mult = c(0.05, 0.2))) +
+    labs(x = "Rate ratio (log scale)", y = NULL) +
+    theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), panel.grid = element_blank())
+
+p_rr <- (p_matrix | p_dots) +
+    plot_layout(widths = c(2, 3), guides = "collect") +
+    plot_annotation(title = "DNM enrichment by synaptic process partition",
+                    theme = theme(plot.title = element_text(size = 8, hjust = 0.5))) &
+    theme(legend.position = "right", legend.box = "vertical", legend.direction = "vertical",
+          legend.title.position = "top", legend.key.size = unit(0.3, "cm"),
+          legend.title = element_text(size = 6, hjust = 0.5),
+          legend.text = element_text(size = 5), legend.margin = margin(l = -5))
+p_rr
+
+ggsave(file.path(figures_dir, "supplement", "03_02_SynGO-BP-partition-RR.png"),
+       p_rr, height = 2.5, width = 4.5, dpi = 300)
+```
+
+
+# --- 3) To remove: Compare results to Bernie's spreadsheet --- #
+
+## 3.1 Identify SynGO "Metabolism & Transport" (Oth) root IDs
+
+```{r find_oth_ids}
+# Bernie's Table S2 includes an "Oth" (Metabolism & Transport) partition that we
+# currently omit. Genes annotated to Oth terms and also to (e.g.) postsynapse are
+# classified as "Post & Oth" by Bernie but land in "Postsynaptic\nonly" by us —
+# inflating our individual-compartment counts relative to Bernie's.
+#
+# This chunk identifies which BP nodes are NOT descendants of our four main roots,
+# then shows the shallow non-root nodes so we can identify the Oth subtree IDs.
+
+known_bp_ids <- c(bp_pre_ids, bp_post_ids, bp_sig_ids, bp_org_ids)
+
+# Nodes in the SynGO BP annotation file that fall outside our four main subtrees
+oth_candidates <- df_cmu_bp %>%
+    filter(!(id %in% known_bp_ids)) %>%
+    arrange(n_gen) %>%
+    select(id, name, parent_id, n_gen)
+
+print(oth_candidates, n = 30)
+
+# Which annotations in the BP gene set point to these candidate Oth nodes?
+df_syngo_data %>%
+    filter(go_domain == "BP", go_id %in% oth_candidates$id) %>%
+    distinct(go_id, go_name) %>%
+    left_join(select(oth_candidates, id, n_gen), by = c("go_id" = "id")) %>%
+    arrange(n_gen) %>%
+    print(n = 30)
+```
+
+## 3.2 Verify BP partition counts against Bernie's Table S2
+
+```{r verify_vs_bernie}
+# Map Bernie's partition labels to our naming convention
+bernie_name_map <- c(
+    "Pre"        = "Presynaptic\nonly",
+    "Post"       = "Postsynaptic\nonly",
+    "Sig"        = "Signaling\nonly",
+    "Org"        = "Organization\nonly",
+    "Pre & Post" = "Pre +\nPost",
+    "Pre & Sig"  = "Pre +\nSig",
+    "Pre & Org"  = "Pre +\nOrg",
+    "Post & Sig" = "Post +\nSig",
+    "Post & Org" = "Post +\nOrg",
+    "Sig & Org"  = "Sig +\nOrg"
+)
+
+df_s2_stats <- df_s2_raw %>%
+    select(Gene_set, n_genes_bernie = `No. genes`, dn_pro_bernie = `No. dn`) %>%
+    filter(Gene_set %in% names(bernie_name_map)) %>%
+    mutate(partition = bernie_name_map[Gene_set])
+
+# Side-by-side comparison (our values vs Bernie's)
+df_bp_rr %>%
+    select(partition, n_genes_ours = n_genes, dn_pro_ours = dn_pro) %>%
+    left_join(df_s2_stats, by = "partition") %>%
+    select(partition, n_genes_ours, n_genes_bernie, dn_pro_ours, dn_pro_bernie) %>%
+    mutate(
+        n_genes_diff = n_genes_ours - n_genes_bernie,
+        dn_pro_diff  = dn_pro_ours  - dn_pro_bernie
+    ) %>%
+    print(n = 20)
+```
+

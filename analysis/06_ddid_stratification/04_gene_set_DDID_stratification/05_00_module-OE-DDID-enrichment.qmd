@@ -1,0 +1,1272 @@
+---
+title: "Module-level O/E enrichment analyses"
+description: "Observed/expected de novo mutation burden for each significant module from the stepwise conditional analysis, across proband and sibling cohorts (ASD-D, ASD-DA, all probands, siblings)."
+date: 2026-07-10
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set output directory for notebook analysis
+notebook_out_dir <- file.path(analysis_dir, "05_gene_set_DDID_stratification")
+```
+
+Load data
+
+```{r load_data}
+# ASD rare variant data
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# Network data (gene-module assignments & kME)
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
+
+# Significant modules from stepwise conditional analysis
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results
+
+# Module topic assignments (top topic per module, with colors)
+df_module_topics <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-module-gamma.RDS")) %>%
+    filter(top_topic == "yes") %>%
+    select(module, topic_label, topic_color)
+
+# Background mutation rates + full proband/sibling counts
+df_asd_dnm <- read_tsv(
+    file.path(data_dir, "full_results_wcounts_2025-10-08.txt"),
+    show_col_types = FALSE
+) %>%
+    clean_names() %>%
+    mutate(mu_total = mu_lof + mu_mis2 + mu_mis1)
+
+# ASD-D / ASD-DA proband counts (ASC)
+df_counts_asd_d   <- read_xlsx(file.path(project_dir, "cmu/counts_asd_ddid.xlsx"))   %>% clean_names()
+df_counts_asd_da <- read_xlsx(file.path(project_dir, "cmu/counts_asd_noddid.xlsx")) %>% clean_names()
+
+# Kaplanis DDD counts (all ASD-D; sex-stratified Male/Female columns)
+# N = 1,194 (adds to ASC ASD-D N = 12,647 → total ASD-D N = 13,841)
+df_counts_kaplanis <- read_tsv(
+    file.path(project_dir, "cmu/Kaplanis_DDD_ASD_counts_by_gene_new_mis_cats_2025-04-09.txt"),
+    show_col_types = FALSE
+) %>%
+    clean_names()
+```
+
+
+# --- 1) O/E enrichment across all modules --- #
+
+The O/E analysis is run identically over every module; the module-level figures in
+Section 1.6 filter to the stepwise-significant set (`df_oe` / `df_pairwise`), while the
+all-module figures (Section 3) use the full result (`df_oe_all` / `df_pairwise_all`).
+
+## 1.1 Format data
+
+Combine counts into one table keyed by gene name
+
+```{r format_counts}
+# Proband and sibling counts are in the ASD DNM file; ASD-D/ASD-DA split from separate files
+df_counts <- df_asd_dnm %>%
+    select(gene, mu_total, mu_lof, mu_mis2, mu_mis1,
+           ptv_proband, mis2_proband, mis1_proband,
+           ptv_sibling, mis2_sibling, mis1_sibling) %>%
+    mutate(
+        count_proband = ptv_proband + mis2_proband + mis1_proband,
+        count_sibling = ptv_sibling + mis2_sibling + mis1_sibling
+    ) %>%
+    left_join(
+        # ASC ASD-D counts + Kaplanis DDD counts (summed Male + Female per variant type)
+        df_counts_asd_d %>%
+            mutate(count_asd_d_proband = ptv_proband + mis2_proband + mis1_proband) %>%
+            select(gene, count_asd_d_proband) %>%
+            left_join(
+                df_counts_kaplanis %>%
+                    mutate(count_kaplanis = (ptv_proband_male + ptv_proband_female) +
+                                            (mis2_proband_male + mis2_proband_female) +
+                                            (mis1_proband_male + mis1_proband_female)) %>%
+                    select(gene, count_kaplanis),
+                by = "gene"
+            ) %>%
+            mutate(count_asd_d_proband = count_asd_d_proband + replace_na(count_kaplanis, 0)) %>%
+            select(gene, count_asd_d_proband),
+        by = "gene"
+    ) %>%
+    left_join(
+        df_counts_asd_da %>%
+            mutate(count_asd_da_proband = ptv_proband + mis2_proband + mis1_proband) %>%
+            select(gene, count_asd_da_proband),
+        by = "gene"
+    )
+```
+
+Extract gene members for each significant module from `df_network_data`
+
+```{r build_gene_sets}
+# Full individual-association stats (used to annotate each module's tier)
+df_all_module_stats <- read_csv(
+    file.path(analysis_dir, "01_module_identification", "01_00_marginal-stats-all-modules.csv")
+) %>%
+    clean_names()
+
+# Every module (excluding the unassigned "none"), annotated by ASD-association tier
+# The O/E analysis is run identically across ALL modules
+# the module figures filter this to the stepwise-significant set
+df_all_modules <- df_network_data %>%
+    unnest(cols = data) %>%
+    ungroup() %>%
+    filter(module != "none") %>%
+    select(study, module, module_label) %>%
+    distinct() %>%
+    left_join(df_all_module_stats %>% select(module, beta, p_adj), by = "module") %>%
+    mutate(
+        tier = case_when(
+            module %in% df_stepwise_res$module        ~ "Stepwise significant",
+            !is.na(p_adj) & p_adj < 0.001 & beta > 0 & !(module %in% df_stepwise_res$module)   ~ "Marginal (ASD-enriched)",
+            !is.na(p_adj) & p_adj < 0.001 & beta < 0 & !(module %in% df_stepwise_res$module)   ~ "Marginal (ASD-depleted)",
+            TRUE                                       ~ "Not associated"
+        ),
+        tier = factor(tier, levels = c("Stepwise significant", "Marginal (ASD-enriched)",
+                                       "Marginal (ASD-depleted)", "Not associated"))
+    )
+
+# Gene members of every module (used for O/E and the per-module scatter)
+df_module_genes <- df_network_data %>%
+    unnest(cols = data) %>%
+    ungroup() %>%
+    filter(module != "none") %>%
+    select(study, module, gene_name, ensembl_gene_id) %>%
+    distinct()
+```
+
+## 1.2 O/E analysis helper functions
+
+```{r helpers}
+# --- O/E with Garwood exact Poisson CI --- #
+# Garwood (1936) exact Poisson confidence interval for the O/E ratio
+# p-value: exact Poisson test of H0: obs ~ Poisson(exp), i.e. O/E = 1
+oe_garwood <- function(obs, exp) {
+    oe   <- obs / exp
+    ci_l <- if (obs > 0) qchisq(0.025, 2 * obs) / (2 * exp) else 0
+    ci_h <- qchisq(0.975, 2 * (obs + 1)) / (2 * exp)
+    p    <- if (obs > 0 && exp > 0)
+                poisson.test(obs, T = exp, alternative = "two.sided")$p.value
+            else NA_real_
+    list(oe = oe, ci_l = ci_l, ci_h = ci_h, p = p)
+}
+
+
+# --- Pairwise conditional binomial test --- #
+
+pairwise_binom <- function(obs1, exp1, obs2, exp2) {
+    obs1 <- as.numeric(obs1)[1]; exp1 <- as.numeric(exp1)[1]
+    obs2 <- as.numeric(obs2)[1]; exp2 <- as.numeric(exp2)[1]
+
+    # Completely uninformative: missing inputs or both groups have zero observed
+    if (any(is.na(c(obs1, obs2, exp1, exp2))) || (obs1 == 0 && obs2 == 0))
+        return(tibble(rate_ratio = NA_real_, ci_l = NA_real_, ci_h = NA_real_, p = NA_real_))
+
+    rel <- (obs1 / exp1) / (obs2 / exp2)   # = 0 when obs1 = 0; Inf when obs2 = 0
+    p0  <- exp1 / (exp1 + exp2)
+    p   <- binom.test(obs1, obs1 + obs2, p0, alternative = "two.sided")$p.value
+
+    # Log-scale SE requires both counts > 0; return rate_ratio + p but no CI when one is zero
+    if (obs1 == 0 || obs2 == 0)
+        return(tibble(rate_ratio = rel, ci_l = NA_real_, ci_h = NA_real_, p = p))
+
+    se <- sqrt(1 / obs1 + 1 / obs2)
+    tibble(
+        rate_ratio = rel,
+        ci_l   = exp(log(rel) - qnorm(0.975) * se),
+        ci_h   = exp(log(rel) + qnorm(0.975) * se),
+        p      = p
+    )
+}
+
+# Cohort sample sizes
+N_cohorts <- list(
+    asd_da_proband = 24839L,
+    asd_d_proband   = 13841L,
+    proband        = 38680L,
+    sibling        =  9567L
+)
+```
+
+## 1.3 Calculate O/E per module per cohort
+
+```{r oe_per_module}
+cohort_spec <- tribble(
+    ~cohort,           ~count_col,            ~n,
+    "proband",         "count_proband",        N_cohorts$proband,
+    "sibling",         "count_sibling",        N_cohorts$sibling,
+    "asd_d_proband",    "count_asd_d_proband",   N_cohorts$asd_d_proband,
+    "asd_da_proband",  "count_asd_da_proband", N_cohorts$asd_da_proband
+)
+
+# O/E for EVERY module (loops over ~1,150 modules, so it's cached)
+oe_cache <- file.path(notebook_out_dir, "05_00_all-modules-OE.RDS")
+
+if (file.exists(oe_cache)) {
+    df_oe_all <- readRDS(oe_cache)
+} else {
+    df_oe_all <- map2_dfr(
+        .x = cohort_spec$cohort,
+        .y = cohort_spec$count_col,
+        .f = function(cohort_name, cnt_col) {
+
+            n_cohort <- cohort_spec %>% filter(cohort == cohort_name) %>% pull(n)
+
+            df_all_modules %>%
+                select(study, module, module_label) %>%
+                pmap_dfr(function(study, module, module_label) {
+
+                    genes_in_mod <- df_module_genes %>%
+                        filter(module == !!module) %>%
+                        pull(gene_name) %>%
+                        unique()
+
+                    m <- df_counts %>% filter(gene %in% genes_in_mod)
+
+                    obs  <- sum(m[[cnt_col]], na.rm = TRUE)
+                    exp  <- sum(m$mu_total,   na.rm = TRUE) * 2 * n_cohort
+                    ci   <- oe_garwood(obs, exp)
+
+                    tibble(
+                        study     = study,
+                        module    = module,
+                        module_label = module_label,
+                        cohort    = cohort_name,
+                        n_genes   = length(genes_in_mod),
+                        n_matched = nrow(m),
+                        n_cohort  = n_cohort,
+                        obs       = obs,
+                        exp       = round(exp, 4),
+                        oe        = ci$oe,
+                        ci_l      = ci$ci_l,
+                        ci_h      = ci$ci_h,
+                        p         = ci$p
+                    )
+                })
+        }
+    ) %>%
+        group_by(cohort) %>%
+        mutate(p_fdr = p.adjust(p, method = "BH")) %>%
+        ungroup() %>%
+        arrange(p)
+
+    saveRDS(df_oe_all, oe_cache)
+}
+```
+
+## 1.4 Cohort pairwise comparisons within each module
+
+For each module, compare:
+- Proband vs Sibling (overall enrichment)
+- ASD-D_Proband vs ASD-DA_Proband (ASD-D specificity)
+- ASD-D_Proband vs Sibling
+- ASD-DA_Proband vs Sibling
+
+```{r cohort_pairs}
+cohort_pairs <- list(
+    c("proband",        "sibling"),
+    c("asd_d_proband",   "asd_da_proband"),
+    c("asd_d_proband",   "sibling"),
+    c("asd_da_proband", "sibling")
+)
+
+# Pairwise comparisons for EVERY module (cached). FDR is corrected across all modules
+# and cohort contrasts; the stepwise subset (df_pairwise) is derived below for 1.6.
+pairwise_cache <- file.path(notebook_out_dir, "05_00_all-modules-pairwise-RR.RDS")
+
+if (file.exists(pairwise_cache)) {
+    df_pairwise_all <- readRDS(pairwise_cache)
+} else {
+    df_pairwise_all <- df_all_modules %>%
+        select(study, module, module_label) %>%
+        pmap_dfr(function(study, module, module_label) {
+            map_dfr(cohort_pairs, function(pair) {
+                ga <- pair[1]; gb <- pair[2]
+
+                sa <- df_oe_all %>% filter(module == !!module, cohort == ga)
+                sb <- df_oe_all %>% filter(module == !!module, cohort == gb)
+
+                pw <- pairwise_binom(sa$obs, sa$exp, sb$obs, sb$exp)
+
+                bind_cols(
+                    tibble(
+                        study      = study,
+                        module     = module,
+                        module_label = module_label,
+                        comparison = paste(ga, "vs", gb)
+                    ),
+                    pw
+                )
+            })
+        }) %>%
+        mutate(p_fdr = p.adjust(p, method = "BH"))
+
+    saveRDS(df_pairwise_all, pairwise_cache)
+}
+```
+
+## 1.5 Export tables
+
+```{r export_tables}
+df_oe_all %>%
+    arrange(study, module, cohort) %>%
+    write_csv(file.path(notebook_out_dir, "05_00_module_OE_ratios.csv"))
+
+df_pairwise_all %>%
+    arrange(study, module, comparison) %>%
+    write_csv(file.path(notebook_out_dir, "05_00_module_cohort_pairwise.csv"))
+```
+
+
+# --- 2) GO enrichment on ASD-DA-biased modules --- #
+
+Modules significantly biased toward ASD-DA probands (ASD without DD/ID 
+over ASD-D probands — `asd_d_proband vs asd_da_proband` relative risk < 1 at
+FDR < 0.05 — are tested for GO over-representation (Fisher's exact, one-sided), to ask
+which biological programs distinguish the ASD-DA-preferential modules.
+
+## 2.1 Define ASD-DA-biased modules
+
+```{r define_asd_da_modules}
+sig_thresh <- 0.05
+
+# ASD-DA-biased = significantly enriched in ASD-DA vs ASD-D probands (rate_ratio < 1)
+# --- OR --- #
+# Enriched in ASD-DA relative to siblings but NOT ASD-D relative to siblings
+
+# Pull the relevant comparisons into one row per module (wide), so criteria that live on
+# different rows of the long pairwise table can be combined
+df_mod_rr <- df_pairwise_all %>%
+    filter(comparison %in% c("asd_d_proband vs asd_da_proband",
+                             "asd_d_proband vs sibling",
+                             "asd_da_proband vs sibling")) %>%
+    mutate(key = recode(comparison,
+        "asd_d_proband vs asd_da_proband" = "contrast",
+        "asd_d_proband vs sibling"        = "asd_d_sib",
+        "asd_da_proband vs sibling"       = "asd_da_sib")) %>%
+    select(module, key, rate_ratio, p_fdr) %>%
+    pivot_wider(names_from = key, values_from = c(rate_ratio, p_fdr))
+
+# A module is ASD-DA-preferential if EITHER:
+#   (A) direct contrast — significantly higher burden in ASD-DA than ASD-D probands
+#       (contrast rate ratio < 1 at FDR < 0.05); the cleaner test of differential burden.
+#   (B) vs-siblings specificity — significantly enriched over siblings in ASD-DA but NOT
+#       in ASD-D. Caveat: non-significance in ASD-D vs siblings is not evidence of no
+#       ASD-D enrichment (could be underpowered), so (B) is descriptive, weaker than (A).
+df_asd_da_biased <- df_mod_rr %>%
+    filter(!str_detect(module, "M0_grey")) %>%
+    mutate(
+        sig_contrast   = coalesce(rate_ratio_contrast   < 1 & p_fdr_contrast   < sig_thresh, FALSE),
+        enr_asd_da_sib = coalesce(rate_ratio_asd_da_sib > 1 & p_fdr_asd_da_sib < sig_thresh, FALSE),
+        enr_asd_d_sib  = coalesce(rate_ratio_asd_d_sib  > 1 & p_fdr_asd_d_sib  < sig_thresh, FALSE),
+        sig_specific   = enr_asd_da_sib & !enr_asd_d_sib,
+        criterion = case_when(
+            sig_contrast & sig_specific ~ "both",
+            sig_contrast                ~ "direct contrast",
+            sig_specific                ~ "ASD-DA-specific vs siblings",
+            TRUE                        ~ NA_character_
+        ),
+        # single rate_ratio / p_fdr (the direct contrast) for downstream ordering + joins
+        rate_ratio = rate_ratio_contrast,
+        p_fdr      = p_fdr_contrast
+    ) %>%
+    filter(!is.na(criterion))
+
+cat(sprintf("%d ASD-DA-preferential modules (%d direct contrast, %d ASD-DA-specific vs sib, %d both)\n",
+            nrow(df_asd_da_biased),
+            sum(df_asd_da_biased$criterion == "direct contrast"),
+            sum(df_asd_da_biased$criterion == "ASD-DA-specific vs siblings"),
+            sum(df_asd_da_biased$criterion == "both")))
+```
+
+## 2.2 GO over-representation
+
+```{r prep_go_ora}
+# GO term names + gene annotations (org.Hs.eg.db / GO.db loaded in setup.R)
+go_terms <- AnnotationDbi::select(
+    GO.db, keys = keys(GO.db), columns = c("TERM", "ONTOLOGY"), keytype = "GOID"
+) %>% as_tibble() %>% clean_names() %>% dplyr::rename(go_id = goid)
+
+go_mapping <- AnnotationDbi::select(
+    org.Hs.eg.db, keys = keys(org.Hs.eg.db, keytype = "ENSEMBL"),
+    columns = c("GO", "ONTOLOGY"), keytype = "ENSEMBL"
+) %>% as_tibble() %>% clean_names() %>%
+    dplyr::rename(go_id = go, ensembl_gene_id = ensembl) %>%
+    dplyr::select(-evidence)
+
+go_background <- go_mapping %>% pull(ensembl_gene_id) %>% unique()
+
+# GO term → gene list (keep terms with 5–1000 genes)
+go_genes_list <- go_mapping %>%
+    group_by(go_id) %>%
+    summarise(genes = list(unique(ensembl_gene_id)), .groups = "drop") %>%
+    filter(lengths(genes) >= 5 & lengths(genes) <= 1000) %>%
+    deframe()
+
+# Per-study background + per-module Ensembl gene sets for the ASD-DA-biased modules
+df_network_unnested <- df_network_data %>% unnest(cols = data) %>% ungroup()
+
+study_genes_list <- df_network_unnested %>%
+    group_by(study) %>%
+    summarise(study_genes = list(unique(ensembl_gene_id)), .groups = "drop") %>%
+    deframe()
+
+df_asd_da_gene_sets <- df_network_unnested %>%
+    filter(module %in% df_asd_da_biased$module) %>%
+    group_by(study, module) %>%
+    summarise(ensembl_ids = list(unique(ensembl_gene_id)), .groups = "drop")
+```
+
+```{r run_go_ora}
+# Fisher's exact ORA of each ASD-DA-biased module against every GO term it overlaps
+# by > 1 gene. Universe = study network ∩ GO background; BH-corrected within module.
+df_go_res <- pmap_dfr(
+    list(df_asd_da_gene_sets$study, df_asd_da_gene_sets$module, df_asd_da_gene_sets$ensembl_ids),
+    function(study_i, module_i, mod_genes) {
+        go_overlap <- names(go_genes_list)[
+            map_lgl(go_genes_list, ~ length(intersect(.x, mod_genes)) > 1)
+        ]
+        map_dfr(go_overlap, function(gid) {
+            ORA_fisher(
+                gene_list1       = mod_genes,
+                gene_list2       = go_genes_list[[gid]],
+                background_list1 = study_genes_list[[study_i]],
+                background_list2 = go_background,
+                alternative      = "greater"
+            ) %>%
+                mutate(study = study_i, module = module_i, go_id = gid)
+        })
+    }
+) %>%
+    left_join(go_terms, by = "go_id") %>%
+    group_by(study, module) %>%
+    mutate(p_adj = p.adjust(p_value, method = "BH"), .before = n_overlap) %>%
+    ungroup() %>%
+    dplyr::rename(n_module = n_list1, n_pathway = n_list2) %>%
+    mutate(pct_module = n_overlap / n_module * 100) %>%
+    left_join(df_asd_da_biased %>% select(module, rate_ratio, criterion), by = "module") %>%
+    dplyr::select(study, module, go_id, term, ontology, everything()) %>%
+    arrange(module, p_value)
+```
+
+```{r export_go}
+saveRDS(df_go_res, file.path(analysis_dir, "05_gene_set_DDID_stratification",
+                             "05_00_ASD-DA-biased-GO-enrichments.RDS"))
+
+df_go_res %>%
+    filter(p_value < 0.05) %>%
+    write_csv(file.path(analysis_dir, "05_gene_set_DDID_stratification",
+                         "05_00_ASD-DA-biased-GO-enrichments.csv"))
+```
+
+## 2.3 Top GO terms per module (not currently included in supp mat)
+
+```{r plot_go_dot, fig.height = 7, fig.width = 9}
+# Modules ordered by ASD-DA bias (most biased = smallest rate_ratio first)
+mod_order_go <- df_asd_da_biased %>% arrange(rate_ratio) %>% pull(module)
+
+top_go <- df_go_res %>%
+    filter(p_adj < 0.05, !is.na(term)) %>%
+    group_by(module) %>%
+    slice_min(p_adj, n = 5, with_ties = FALSE) %>%
+    ungroup()
+
+p_go_dot <- top_go %>%
+    mutate(module = factor(module, levels = mod_order_go)) %>%
+    ggplot(aes(x = module, y = reorder(term, -log10(p_adj)),
+               size = pct_module, color = -log10(p_adj))) +
+    geom_point() +
+    scale_color_viridis_c(option = "plasma", name = "-log10(FDR)") +
+    scale_size_continuous(range = c(1, 5), name = "% module genes") +
+    facet_grid(ontology ~ ., scales = "free", space = "free") +
+    labs(x = NULL, y = NULL, title = "Top GO terms for ASD-DA-biased modules") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          strip.text = element_text(face = "bold"), strip.background = element_blank())
+
+p_go_dot
+```
+
+
+# --- 3) Supplemental plots --- #
+
+## 3.1 Panel A: Forest plot of all cohorts O/E with ASD-D:ASD-DA significance
+
+```{r oe_forest, fig.height = 2.7, fig.width = 3.5}
+# Filter for stepwise significant modules to plot
+df_oe_plot <- df_oe_all %>% 
+    filter(module %in% df_stepwise_res$module)
+
+# Module order: ASD-D O/E descending
+oe_mod_order <- df_oe_plot %>% 
+    filter(cohort == "asd_d_proband") %>%
+    arrange(desc(oe)) %>%
+    pull(module_label)
+
+# Significance labels from the ASD-D vs ASD-DA pairwise comparison
+df_asd_d_asd_da_sig <- df_pairwise_plot %>% 
+    filter(comparison == "asd_d_proband vs asd_da_proband") %>%
+    mutate(
+        sig_lab = case_when(
+            p_fdr < 0.001 ~ "***",
+            p_fdr < 0.01  ~ "**",
+            p_fdr < 0.05  ~ "*",
+            TRUE          ~ ""
+        )
+    ) %>%
+    select(module_label, sig_lab)
+
+# Star x-position = max CI upper bound across all four cohorts
+df_oe_star <- df_oe_plot %>%
+    group_by(module_label) %>%
+    summarise(x_star = max(ci_h, na.rm = TRUE), .groups = "drop") %>%
+    left_join(df_asd_d_asd_da_sig, by = "module_label") %>%
+    filter(sig_lab != "") %>%
+    mutate(module_label = factor(module_label, levels = rev(oe_mod_order)))
+
+# Assign cohort colors
+oe_cohort_colors <- c(
+    "asd_d_proband" = "#C0392B", 
+    "asd_da_proband" = "#4472C4", 
+    "sibling" = "grey40"
+)
+
+# Plot
+p_oe_forest <- df_oe_plot %>% 
+    filter(cohort != "proband") %>% 
+    
+    mutate(
+        module_label = factor(module_label, levels = rev(oe_mod_order)),
+        cohort = factor(cohort, levels = names(oe_cohort_colors))
+    ) %>%
+    
+    ggplot(aes(x = oe, y = module_label, color = cohort)) +
+    geom_vline(xintercept = 1, linetype = "dashed",
+               color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h),
+        position = position_dodge(width = 0.7),
+        size = 0.075, linewidth = 0.25
+    ) +
+    geom_text(
+        data        = df_oe_star,
+        aes(x = x_star, y = module_label, label = sig_lab),
+        inherit.aes = FALSE,
+        hjust = -0.15, vjust = 0.75, size = 2.8, color = "black"
+    ) +
+    scale_color_manual(
+        values = oe_cohort_colors,
+        labels = c("ASD-D probands", "ASD-DA probands", "Siblings"),
+        name   = NULL
+    ) +
+    labs(
+        x     = "O/E ratio",
+        y     = NULL,
+        title = "DNM burden across modules"
+    ) +
+    coord_cartesian(clip = "off") +
+    theme(
+        legend.position = c(0.75, 0.3),
+        #legend.position = "none", # legend will be in Yundan's figure
+        legend.margin   = margin(t = -2, b = -5),
+        legend.title    = element_text(size = 6),
+        legend.text     = element_text(size = 5.5),
+        axis.text.x     = element_text(size = 5.5),
+        axis.text.y     = element_text(size = 6),
+        axis.title      = element_text(size = 6),
+        panel.border    = element_blank(),
+        axis.line       = element_line(linewidth = 0.25),
+        plot.title      = element_text(size = 7, face = "bold")
+    )
+
+p_oe_forest
+```
+
+## 3.2 Panel B: Scatter plot of ASD-DA vs siblings (x) × ASD-D vs siblings (y)
+
+```{r rr_scatter, fig.height = 2.7, fig.width = 4}
+# Genes per module with at least one mutation in ASD-D or ASD-DA probands
+df_module_n_mut <- df_module_genes %>%
+    left_join(df_counts %>% select(gene, count_asd_d_proband, count_asd_da_proband),
+              by = c("gene_name" = "gene")) %>%
+    filter((count_asd_d_proband + count_asd_da_proband) > 0) %>%
+    group_by(module) %>%
+    summarise(n_genes_mut = n_distinct(gene_name), .groups = "drop")
+
+# Filter for stepwise significant modules
+df_pairwise_plot <- df_pairwise_all %>%
+    filter(module %in% df_stepwise_res$module)
+
+# Pivot wider & calculate # of genes with at least one mutation in the modules
+df_scatter <- df_pairwise_plot %>%
+    filter(comparison %in% c("asd_d_proband vs sibling", "asd_da_proband vs sibling")) %>%
+    select(module, module_label, comparison, rate_ratio, ci_l, ci_h) %>%
+    mutate(group = if_else(comparison == "asd_d_proband vs sibling", "asd_d", "asd_da")) %>%
+    select(-comparison) %>%
+    pivot_wider(
+        id_cols     = c(module, module_label),
+        names_from  = group,
+        values_from = c(rate_ratio, ci_l, ci_h)
+    ) %>%
+    left_join(df_module_topics,  by = "module") %>%
+    left_join(df_module_n_mut,   by = "module")
+
+# Labels for full plot only (outliers)
+full_plot_labels <- c("TCF4 (+)", "BHLHE22 (-)", "ZNF281 (+)")
+
+# Labels for zoomed plot only (everything except outliers)
+zoom_labels <- c(
+    "MEF2C (+)",
+    "CUX1 (+)",
+    "SRCIN1",
+    "THRB (-)",
+    "SOX11 (+)",
+    "VEZF1",
+    "NR3C1 (+)",
+    "EP300",
+    "JUND (+)"
+)
+
+# Full plot - only outlier labels, no zoom
+p_full <- df_scatter %>%
+    ggplot(aes(x = rate_ratio_asd_da, y = rate_ratio_asd_d, fill = topic_color)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_point(aes(size = n_genes_mut), shape = 21, color = "white", stroke = 0.5, alpha = 0.75) +
+    ggrepel::geom_text_repel(
+        data = . %>% filter(module_label %in% full_plot_labels),
+        aes(label = module_label, color = topic_color),
+        size               = 2,
+        box.padding        = 0.75,
+        point.padding      = 0.25,
+        force              = 2.5,
+        force_pull         = 0.8,
+        min.segment.length = 0.0,
+        segment.color      = "grey70",
+        segment.size       = 0.2,
+        max.overlaps       = Inf,
+        show.legend        = FALSE
+    ) +
+    # Draw zoom rectangle
+    annotate("rect",
+        xmin = 1.2, xmax = 2.5,
+        ymin = 1.95,   ymax = 6.3,
+        fill = NA, color = "grey70", linewidth = 0.3, linetype = "dashed"
+    ) +
+    scale_size_continuous(range = c(1.5, 3.5), name = "# genes with ≥1 mutation") +
+    scale_y_log10() +
+    scale_x_log10() +
+    scale_color_identity() +
+    scale_fill_identity(
+        guide  = guide_legend(order = 2, override.aes = list(size = 3)),
+        labels = setNames(df_scatter$topic_label, df_scatter$topic_color),
+        name   = NULL
+    ) +
+    guides(size = guide_legend(order = 1, override.aes = list(color = "black", fill = "grey60"))) +
+    labs(x = "ASD-DA vs siblings (log10 RR)", y = "ASD-D vs siblings (log10 RR)") +
+    theme(
+        legend.text      = element_text(size = 5.5),
+        legend.title     = element_text(size = 6, margin = margin(b = 0)),
+        axis.text        = element_text(size = 5.5),
+        axis.title       = element_text(size = 6)
+    )
+
+# Zoomed plot - only cluster labels, grey background
+p_zoom <- df_scatter %>%
+    filter(rate_ratio_asd_da >= 1.3, rate_ratio_asd_da <= 2.5,
+           rate_ratio_asd_d   >= 2,   rate_ratio_asd_d   <= 6.1) %>%
+    ggplot(aes(x = rate_ratio_asd_da, y = rate_ratio_asd_d, fill = topic_color)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_point(aes(size = n_genes_mut), shape = 21, color = "white", stroke = 0.5, alpha = 0.75) +
+    ggrepel::geom_text_repel(
+        data = . %>% filter(module_label %in% zoom_labels),
+        aes(label = module_label, color = topic_color),
+        size               = 2,
+        box.padding        = 0.75,
+        point.padding      = 0.25,
+        force              = 2.5,
+        force_pull         = 0.8,
+        min.segment.length = 0.0,
+        segment.color      = "grey70",
+        segment.size       = 0.2,
+        max.overlaps       = Inf,
+        show.legend        = FALSE
+    ) +
+    scale_size_continuous(range = c(1.5, 3.5), guide = "none") +
+    scale_y_log10(limits = c(2.1, 6.1)) +
+    scale_x_log10(limits = c(1.3, 2.4)) +
+    scale_color_identity() +
+    scale_fill_identity(guide = "none") +
+    labs(x = NULL, y = NULL) +
+    theme(
+        legend.position = "none",
+        axis.text       = element_text(size = 5.5),
+        axis.title      = element_text(size = 6),
+        panel.background = element_rect(fill = "grey97"),
+        panel.border     = element_rect(color = "grey70", linewidth = 0.3, fill = NA)
+    )
+
+# Combine with patchwork
+p_rr_scatter <- p_full + plot_spacer() + p_zoom +
+    plot_layout(nrow = 1, widths = c(0.75, -0.1, 1),
+                guides = "collect") &
+    plot_annotation(title = "Relative module enrichments") &
+    theme(plot.title = element_text(size = 7, face = "bold"),
+          legend.position = "bottom",
+          legend.direction = "horizontal",
+          legend.title.position = "top",
+          legend.margin = margin(t = -5)
+    )
+
+p_rr_scatter
+```
+
+## 3.3 Panel C: Scatter plot of ASD-DA vs siblings (x) × ASD-D vs siblings (y) across all modules
+
+```{r all_modules_scatter, fig.width = 7.09, fig.height = 4.5}
+# Color by significance vs siblings:
+#   Both    = sig in ASD-D and ASD-DA vs siblings (green)
+#   ASD-D    = sig in ASD-D vs siblings only (red)
+#   ASD-DA  = sig in ASD-DA vs siblings only (blue)
+#   Neither = neither significant (gray)
+col_sig_group <- c(
+    "Both"       = "#885371",
+    "ASD-D only"  = "#C0392B",
+    "ASD-DA only"= "#4472C4",
+    "Neither"    = "grey75"
+)
+
+# Module sizes (total genes per module)
+df_all_module_sizes <- df_module_genes %>%
+    group_by(module) %>%
+    summarise(n_genes = n_distinct(gene_name), .groups = "drop")
+
+# One row per module: rate ratio + significance (FDR < 0.05 & enriched) vs siblings, for
+# both ASD-D and ASD-DA, then classify by which contrast(s) are significant.
+df_scatter_all <- df_pairwise_all %>%
+    filter(comparison %in% c("asd_d_proband vs sibling", "asd_da_proband vs sibling"),
+           !str_detect(module, "M0_grey")) %>%                 # drop grey modules
+    mutate(group  = if_else(comparison == "asd_d_proband vs sibling", "asd_d", "asd_da"),
+           is_sig = coalesce(p_fdr < 0.05 & rate_ratio > 1, FALSE)) %>%
+    select(module, module_label, group, rate_ratio, is_sig) %>%
+    pivot_wider(names_from = group, values_from = c(rate_ratio, is_sig)) %>%
+    left_join(df_all_module_sizes, by = "module") %>%
+    mutate(sig_group = case_when(
+        is_sig_asd_d  &  is_sig_asd_da ~ "Both",
+        is_sig_asd_d  & !is_sig_asd_da ~ "ASD-D only",
+        !is_sig_asd_d &  is_sig_asd_da ~ "ASD-DA only",
+        TRUE                           ~ "Neither"
+    ) %>% factor(levels = names(col_sig_group))) %>%
+    # draw "Neither" first so significant points render on top
+    arrange(sig_group != "Neither")
+
+# Generate plot
+p_scatter_all <- df_scatter_all %>%
+    ggplot(aes(x = rate_ratio_asd_da, y = rate_ratio_asd_d)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_point(aes(fill = sig_group, size = n_genes),
+               shape = 21, color = "white", stroke = 0.2) +
+    # Label ASD-DA-only significant modules using module_label
+    ggrepel::geom_text_repel(
+        data = df_scatter_all %>% filter(sig_group == "ASD-DA only"),
+        aes(label = module_label),
+        color = col_sig_group["ASD-DA only"],
+        size = 2, nudge_x = 0.35, direction = "y", hjust = 0,
+        box.padding = 0.3, point.padding = 0.2,
+        min.segment.length = 0, segment.color = "grey30", segment.size = 0.3,
+        max.overlaps = Inf, show.legend = FALSE
+    ) +
+    scale_fill_manual(
+        values = col_sig_group,
+        name   = "Significant vs siblings",
+        labels = c(
+            "Both"    = "ASD-D & ASD-DA",
+            "ASD-D only"    = "ASD-D only",
+            "ASD-DA only"  = "ASD-DA only",
+            "Neither" = "Neither"
+        ),
+        guide = guide_legend(override.aes = list(size = 3, color = "white"))
+    ) +
+    scale_size_continuous(
+        range = c(1, 4),
+        name  = "Module size\n(# genes)",
+        guide = guide_legend(
+            override.aes = list(fill = "grey50", color = "white")
+        )
+    ) +
+    scale_x_log10() +
+    scale_y_log10() +
+    labs(
+        x     = "ASD-DA vs siblings (log RR)",
+        y     = "ASD-D vs siblings (log RR)",
+        title = "All module relative enrichments"
+    ) +
+    theme(
+        plot.title           = element_text(size = 7, face = "bold"),
+        axis.title           = element_text(size = 6),
+        axis.text            = element_text(size = 5.5),
+        legend.title         = element_text(size = 6),
+        legend.text          = element_text(size = 5.5),
+        legend.position      = c(0.01, 0.99),
+        legend.justification = c(0, 1),
+        legend.box           = "vertical",
+        legend.spacing.y     = unit(0.05, "cm"),
+        legend.margin        = margin(2, 2, 2, 2),
+        legend.background    = element_rect(fill = scales::alpha("white", 0.7),
+                                            color = "grey85", linewidth = 0.2),
+        legend.key.size      = unit(0.25, "cm")
+    )
+
+p_scatter_all
+```
+
+## 3.4 Panel D: Box plots of OE distributions
+
+```{r all_modules_oe_box, fig.height = 5, fig.width = 2.5}
+dodge_w      <- 0.8
+cohort_order <- names(oe_cohort_colors)   # asd_d_proband, asd_da_proband, sibling
+
+# Cohort pairs to test (internal names)
+cohort_pairs_box <- list(
+    c("asd_d_proband",  "sibling"),
+    c("asd_da_proband", "sibling"),
+    c("asd_d_proband",  "asd_da_proband")
+)
+
+df_oe_box_data <- df_oe_all %>%
+    left_join(df_all_modules %>% select(module, tier), by = "module") %>%
+    filter(cohort %in% cohort_order, !is.na(oe), !is.na(tier)) %>%
+    mutate(
+        cohort = factor(cohort, levels = cohort_order),
+        tier   = factor(tier, levels = levels(df_all_modules$tier))
+    )
+
+# --- Wilcoxon tests: compare cohorts within each tier (internal cohort names) --- #
+stat_box <- df_oe_box_data %>%
+    group_by(tier) %>%
+    group_modify(~ {
+        oe_split <- split(.x$oe, .x$cohort)
+        map_dfr(cohort_pairs_box, function(pair) {
+            if (all(pair %in% names(oe_split)))
+                tibble(group1 = pair[1], group2 = pair[2],
+                       p = wilcox.test(oe_split[[pair[1]]], oe_split[[pair[2]]])$p.value)
+        })
+    }) %>%
+    mutate(
+        p.adj    = p.adjust(p, method = "BH"),
+        p.signif = case_when(
+            p.adj < 0.0001 ~ "****", p.adj < 0.001 ~ "***",
+            p.adj < 0.01   ~ "**",   p.adj < 0.05  ~ "*", TRUE ~ "ns"
+        )
+    ) %>%
+    ungroup() %>%
+    filter(p.signif != "ns")
+
+# --- Bracket x positions for the dodged cohort layout --- #
+# offset for cohort i = dodge_w * (i − (n+1)/2) / n; brackets stacked per tier (narrowest lowest)
+cohort_offsets <- setNames(
+    dodge_w * (seq_along(cohort_order) - (length(cohort_order) + 1) / 2) / length(cohort_order),
+    cohort_order
+)
+tier_pos <- setNames(seq_along(levels(df_oe_box_data$tier)), levels(df_oe_box_data$tier))
+
+stat_box <- stat_box %>%
+    mutate(xmin = tier_pos[as.character(tier)] + cohort_offsets[group1],
+           xmax = tier_pos[as.character(tier)] + cohort_offsets[group2]) %>%
+    group_by(tier) %>%
+    arrange(abs(xmax - xmin)) %>%
+    mutate(y.position = 20 * 1.6^(row_number() - 1)) %>%
+    ungroup()
+
+y_max_plot <- if (nrow(stat_box) > 0) max(stat_box$y.position) * 2 else 50
+
+p_oe_box <- df_oe_box_data %>%
+    ggplot(aes(x = tier, y = oe, fill = cohort, color = cohort)) +
+    ggbeeswarm::geom_quasirandom(
+        alpha = 0.15, size = 0.4, dodge.width = dodge_w, show.legend = FALSE
+    ) +
+    geom_boxplot(
+        alpha = 0.25, outlier.shape = NA, width = 0.6,
+        linewidth = 0.15, position = position_dodge(dodge_w)
+    ) +
+    geom_boxplot(
+        color = "black", outlier.shape = NA, width = 0.6,
+        linewidth = 0.35, position = position_dodge(dodge_w)
+    ) +
+    # Significance brackets: geom_segment + geom_text for reliable log-scale positioning
+    geom_segment(data = stat_box, inherit.aes = FALSE,
+                 aes(x = xmin, xend = xmax, y = y.position, yend = y.position),
+                 color = "grey20", linewidth = 0.3) +
+    geom_segment(data = stat_box, inherit.aes = FALSE,
+                 aes(x = xmin, xend = xmin, y = y.position / 1.25, yend = y.position),
+                 color = "grey20", linewidth = 0.3) +
+    geom_segment(data = stat_box, inherit.aes = FALSE,
+                 aes(x = xmax, xend = xmax, y = y.position / 1.25, yend = y.position),
+                 color = "grey20", linewidth = 0.3) +
+    geom_text(data = stat_box, inherit.aes = FALSE,
+              aes(x = (xmin + xmax) / 2, y = y.position, label = p.signif),
+              vjust = 0.2, size = 2, color = "grey20", angle = 90) +
+    geom_hline(yintercept = 1, linetype = "dashed", color = "grey40", linewidth = 0.4) +
+    scale_fill_manual(values = oe_cohort_colors,
+                      labels = c("ASD-D probands", "ASD-DA probands", "Siblings"), name = NULL) +
+    scale_color_manual(values = oe_cohort_colors, name = NULL, guide = "none") +
+    scale_x_discrete(labels = c(
+        "Stepwise significant"    = "Stepwise\nsignificant",
+        "Marginal (ASD-enriched)" = "Marginal\n(ASD-enriched)",
+        "Marginal (ASD-depleted)" = "Marginal\n(ASD-depleted)",
+        "Not associated"          = "Not\nassociated"
+    )) +
+    scale_y_log10() +
+    # flip so tiers run down the y-axis and O/E along the x-axis
+    coord_flip(ylim = c(0.1, y_max_plot)) +
+    labs(x = NULL, y = "O/E ratio (log scale)",
+         title = "O/E by module tier and cohort"
+         ) +
+    theme(plot.title  = element_text(size = 7, face = "bold"),
+          axis.title  = element_text(size = 6),
+          axis.text.x = element_text(size = 5.5),   # O/E axis (after flip)
+          axis.text.y = element_text(size = 6.5),   # tier labels (after flip)
+          legend.position = "none")                 # legend is shown in Panel A
+
+p_oe_box
+```
+
+## 3.5 Combined panel
+
+```{r oe_ddid_combined, fig.height = 7, fig.width = 7.09}
+row_top <- p_oe_forest + wrap_elements(full = p_rr_scatter) +
+    plot_layout(widths = c(1, 2))
+
+row_bottom <- p_scatter_all + (p_oe_box + coord_flip()) +
+    plot_layout(widths = c(2, 1))
+
+p_module_ddid_combined <- row_top / row_bottom +
+    plot_layout(heights = c(1.25, 2)) +
+    plot_annotation(tag_levels = "A") &
+    theme(plot.tag = element_text(face = "bold", size = 10))
+
+p_module_ddid_combined
+
+ggsave(
+    filename = file.path(figures_dir, "supplement", "05_00_module-DDID-OE-enrichment.pdf"),
+    plot  = p_module_ddid_combined,
+    height    = 7,
+    width     = 7.09,
+    dpi       = 300
+)
+```
+
+
+# ------------------------------------------------------------------------------
+
+
+## DEPR
+
+## 1 Proband vs Sibling enrichment
+
+```{r plot_proband_sib, fig.height = 5, fig.width = 4}
+sig_thresh <- 0.05
+
+p_prob_sib <- df_pairwise %>%
+    filter(comparison == "proband vs sibling") %>%
+    mutate(
+        #module   = factor(module, levels = rev(mod_order)),
+        sig      = p_fdr < sig_thresh,
+        sig_lab  = case_when(
+            p_fdr < 0.001 ~ "***",
+            p_fdr < 0.01  ~ "**",
+            p_fdr < sig_thresh ~ "*",
+            TRUE          ~ ""
+        )
+    ) %>%
+    ggplot(aes(x = rate_ratio, y = reorder(module, rate_ratio))) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h, color = sig),
+        size = 0.3, linewidth = 0.4
+    ) +
+    geom_text(
+        aes(x = ci_h, label = sig_lab),
+        hjust = -0.3, size = 2.5, color = "black"
+    ) +
+    scale_color_manual(values = c("TRUE" = "#2E7D32", "FALSE" = "grey60"), guide = NULL) +
+    labs(
+        x     = "Relative risk (proband / sibling)",
+        y     = NULL,
+        title = "Proband vs Sibling"
+    )
+
+p_prob_sib
+
+f_save_plot(
+    plot_obj  = p_prob_sib,
+    plot_name = "05_proband_vs_sibling_RR.pdf",
+    overwrite = TRUE,
+    height    = 5,
+    width     = 4,
+    dpi       = 300
+)
+```
+
+## 2 ASD-D vs ASD-DA enrichment
+
+```{r plot_asd_d_asd_da, fig.height = 5, fig.width = 4}
+p_asd_d <- df_pairwise %>%
+    filter(comparison == "asd_d_proband vs asd_da_proband") %>%
+    mutate(
+        #module  = factor(module, levels = rev(mod_order)),
+        sig     = p_fdr < sig_thresh,
+        sig_lab = case_when(
+            p_fdr < 0.001 ~ "***",
+            p_fdr < 0.01  ~ "**",
+            p_fdr < sig_thresh ~ "*",
+            TRUE          ~ ""
+        )
+    ) %>%
+    ggplot(aes(x = rate_ratio, y = reorder(module, rate_ratio))) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h, color = sig),
+        size = 0.3, linewidth = 0.4
+    ) +
+    geom_text(
+        aes(x = ci_h, label = sig_lab),
+        hjust = -0.3, size = 2.5, color = "black"
+    ) +
+    scale_color_manual(values = c("TRUE" = "#C0392B", "FALSE" = "grey60"), guide = NULL) +
+    labs(
+        x     = "Relative risk (ASD-D / ASD-DA)",
+        y     = NULL,
+        title = "ASD-D vs ASD-DA probands"
+    )
+
+p_asd_d
+
+f_save_plot(
+    plot_obj  = p_asd_d,
+    plot_name = "05_ASD-D_vs_ASD-DA_RR.pdf",
+    overwrite = TRUE,
+    height    = 5,
+    width     = 4,
+    dpi       = 300
+)
+```
+
+## 3 ASD-D vs Siblings and ASD-DA vs Siblings
+
+```{r plot_vs_sib, fig.height = 5.5, fig.width = 5}
+# Order modules by ASD-D vs sibling RR (descending)
+mod_order_sib <- df_pairwise %>%
+    filter(comparison == "asd_d_proband vs sibling") %>%
+    arrange(rate_ratio) %>%
+    pull(module)
+
+p_vs_sib <- df_pairwise %>%
+    filter(comparison %in% c("asd_d_proband vs sibling", "asd_da_proband vs sibling")) %>%
+    mutate(
+        group  = if_else(comparison == "asd_d_proband vs sibling", "ASD-D", "ASD-DA"),
+        module = factor(module, levels = mod_order_sib),
+        color_group = case_when(
+            p_fdr < sig_thresh & group == "ASD-D"   ~ "ASD-D",
+            p_fdr < sig_thresh & group == "ASD-DA" ~ "ASD-DA",
+            TRUE                                    ~ "ns"
+        )
+    ) %>%
+    ggplot(aes(x = rate_ratio, y = module, color = color_group)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h),
+        position = position_dodge(width = 0.6),
+        size = 0.25, linewidth = 0.4
+    ) +
+    scale_color_manual(
+        values = c("ASD-D" = "#C0392B", "ASD-DA" = "#4472C4", "ns" = "grey70"),
+        labels = c("ASD-D" = "ASD-D (FDR < 0.05)", "ASD-DA" = "ASD-DA (FDR < 0.05)", "ns" = "ns"),
+        name   = NULL
+    ) +
+    coord_cartesian(xlim = c(NA, 30)) +
+    labs(
+        x     = "Relative risk vs siblings",
+        y     = NULL,
+        title = "Proband enrichment vs siblings"
+    ) +
+    theme(legend.position = "top")
+
+p_vs_sib
+
+f_save_plot(
+    plot_obj  = p_vs_sib,
+    plot_name = "05_ASD-D_ASD-DA_vs_sibling_RR.pdf",
+    overwrite = TRUE,
+    height    = 5.5,
+    width     = 5,
+    dpi       = 300
+)
+```
+
+## 4 Combined figure
+
+```{r plot_combined, fig.height = 7, fig.width = 12}
+p_combined <- (p_oe | (p_prob_sib / p_asd_d) | free(p_scatter_sib) ) +
+    plot_layout(widths = c(1, 1, 1.5)) +
+    plot_annotation(tag_levels = "a")
+
+p_combined
+
+f_save_plot(
+    plot_obj  = p_combined,
+    plot_name = "05_module_OE_combined.png",
+    overwrite = TRUE,
+    height    = 7,
+    width     = 12,
+    dpi       = 300
+)
+```
+
+**Figure legend.** Observed/expected (O/E) de novo mutation burden across the 28 co-expression modules and gene regulatory network regulons independently associated with ASD rare-variant risk (identified in notebook 01b). De novo variants included: protein-truncating variants (PTVs), damaging missense variants (Mis2, MPC > 2), and moderate-impact missense variants (Mis1, 1 < MPC ≤ 2). Expected mutation counts were derived from published per-gene mutation rate models (Samocha et al.) scaled by cohort size: *E* = Σ(μ~lof~ + μ~mis2~ + μ~mis1~) × 2*N*, where *N* is the number of diploid individuals in each cohort. Cohorts: all probands (*N* = 38,680), unaffected siblings (*N* = 9,567), probands with ASD and developmental delay or intellectual disability (ASD-D; *N* = 13,841, comprising 12,647 ASC ASD-D probands and 1,194 Kaplanis DDD probands), and probands with ASD without ASD-D (ASD-DA; *N* = 24,839).
+
+**(a)** O/E ratio for each module and cohort. Points show the ratio of observed to expected de novo mutation counts; horizontal bars show the 95% Garwood exact Poisson confidence interval (Garwood 1936). Modules are ordered by descending O/E in all probands. A dashed vertical line marks O/E = 1 (no enrichment). **(b)** Relative risk versus unaffected siblings for ASD-D probands (red) and ASD-DA probands (blue), shown side by side for each module. Modules are ordered by descending ASD-D vs sibling RR. Both groups show mutation burden elevated above siblings, with ASD-D probands showing a consistently stronger signal. **(c)** Pairwise relative risk comparing all probands to unaffected siblings for each module. **(d)** Pairwise relative risk comparing ASD-D to ASD-DA probands. For panels (b–d), the relative risk (RR) is computed as the ratio of O/E ratios between the two groups: RR = (obs₁/exp₁) / (obs₂/exp₂). Statistical significance was assessed with a two-sided exact binomial test using the expected mutation rate as the null probability, and p-values were corrected for multiple comparisons across all cohort contrasts using the Benjamini-Hochberg false discovery rate (FDR) procedure. Asterisks denote FDR thresholds: \*p < 0.05, \*\*p < 0.01, \*\*\*p < 0.001.
+
+
+
+Plots of the all-module O/E result (`df_oe_all` / `df_pairwise_all`, computed in
+Section 1), with modules annotated by association tier: stepwise-significant, marginally
+associated (FDR < 0.01, β > 0), marginally depleted, or not associated with ASD risk.
+
+## All modules plots
+
+### 3.5.2 O/E distribution across all modules
+
+```{r all_modules_oe_dist, fig.height = 3, fig.width = 7}
+col_tier <- c(
+    "Stepwise significant"       = "#922B21",
+    "Marginal (ASD-enriched)"   = "#CA6F1E",
+    "Marginal (ASD-depleted)"   = "steelblue",
+    "Not associated"     = "gray60"
+)
+
+p_oe_dist <- df_oe_all %>%
+    left_join(df_all_modules %>% select(module, tier), by = "module") %>%
+    filter(cohort %in% c("asd_d_proband", "asd_da_proband", "proband", "sibling")) %>%
+    mutate(
+        cohort = factor(cohort,
+                        levels = c("asd_d_proband", "asd_da_proband", "proband", "sibling"),
+                        labels = cohort_labels[c("asd_d_proband", "asd_da_proband", "proband", "sibling")])
+    ) %>%
+    
+    ggplot(aes(x = oe, fill = tier, color = tier)) +
+    geom_density(alpha = 0.3, linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey40", linewidth = 0.4) +
+    scale_fill_manual(values  = col_tier, name = NULL) +
+    scale_color_manual(values = col_tier, name = NULL) +
+    scale_x_log10() +
+    facet_wrap(vars(cohort), nrow = 1) +
+    labs(
+        x     = "O/E ratio (log scale)",
+        y     = "Density",
+        title = "O/E distribution by module tier and cohort"
+    ) +
+    theme(legend.position = "top",
+          legend.key.size = unit(0.5, "cm"),
+          strip.text = element_text(face = "bold"),
+          strip.background = element_blank()
+    )
+
+p_oe_dist
+
+f_save_plot(
+    plot_obj  = p_oe_dist,
+    plot_name = "05_all-module_OE_distribution.png",
+    overwrite = TRUE,
+    height    = 3,
+    width     = 7,
+    dpi       = 300
+)
+```
+
+# --- 4) Plots for manuscript --- #
+
+## 4.0 Prep
+
+```{r prep}
+## Load data
+
+# Significant modules
+df_pairwise <- read_xlsx(file.path(analysis_dir, "05_gene_set_DDID_stratification", "05_00_module_cohort_pairwise.xlsx"))
+df_oe <- read_xlsx(file.path(analysis_dir, "05_gene_set_DDID_stratification", "05_00_module_OE_ratios.xlsx"))
+
+# All modules
+df_oe_all <- readRDS(file.path(analysis_dir, "05_gene_set_DDID_stratification", "05_00_all-modules-OE.RDS"))
+df_pairwise_all <- readRDS(file.path(analysis_dir, "05_gene_set_DDID_stratification", "05_00_all-modules-pairwise.RDS"))
+
+# Set colors and labels
+cohort_labels <- c(
+    #proband       = "All probands",
+    sibling       = "Siblings",
+    asd_d_proband  = "ASD-D probands",
+    asd_da_proband = "ASD-DA probands"
+)
+
+col_cohort <- c(
+    #proband        = "#2E7D32",
+    sibling        = "gray40",
+    asd_d_proband   = "#C0392B",
+    asd_da_proband = "#4472C4"
+)
+
+# Hub gene map: highest-kME gene per co-expression module (across all modules)
+hub_gene_map_all <- df_module_kme %>%
+    filter(module == kME_module) %>%
+    group_by(module) %>%
+    slice_max(kME, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    dplyr::select(module, hub_gene = gene_name)
+
+# Display labels for the 28 stepwise-significant modules
+df_module_labels <- df_oe_all %>%
+    dplyr::select(module) %>%
+    distinct() %>%
+    left_join(hub_gene_map_all, by = "module") %>%
+    mutate(
+        is_regulon   = is.na(hub_gene),
+        regulon_gene = str_extract(module, "^[^_\\-\\+]+"),
+        regulon_sign = str_extract(str_remove(module, "^[^_\\-\\+]+"), "[\\+\\-]"),
+        module_label = if_else(
+            is_regulon,
+            paste0(regulon_gene, " (", regulon_sign, ")"),
+            hub_gene
+        ),
+        module_label = if_else(module_label == "43894", "MARCHF4", module_label)
+    )  %>% 
+    
+    # manually change the weird number gene
+    mutate(
+        module_label = ifelse(module_label == "43894", "MARCHF4", module_label)
+    )
+```
+
+
+
+# --- 5) Tables for manuscript --- #
+
+```{r all_modules_export}
+write_xlsx(
+    list(
+        "A. All module OE ratios" = df_oe_all,
+        "B. All module pairwise RRs" = df_pairwise_all %>% filter(!str_detect(module, "M0_grey")) %>% arrange(p_fdr)
+    ),
+    path = file.path(analysis_dir, "05_gene_set_DDID_stratification", "05_00_all-module-OE-ratios.xlsx")
+)
+```
+

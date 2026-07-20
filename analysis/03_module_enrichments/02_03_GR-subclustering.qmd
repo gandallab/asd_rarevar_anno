@@ -1,0 +1,232 @@
+---
+title: "GR subclustering"
+description: "Define subclusters among GR ASD genes (TADA FDR < 0.001) based on similarity of GO term membership"
+date: 2026-07-08
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+```
+
+## 0.1 Load data
+
+```{r load_data}
+# Gene-topic assignments (from notebook 02_02)
+df_gene_assignments <- read_csv(file.path(notebook_out_dir, "02_02_gene-topic-assignment.csv"))
+
+# ASD rare variant statistics
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# GO ID to gene mapping
+go_mapping <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = keys(org.Hs.eg.db, keytype = "ENSEMBL"),
+  columns = c("GO", "ONTOLOGY"),
+  keytype = "ENSEMBL"
+) %>%
+    as_tibble() %>%
+    clean_names %>%
+    dplyr::rename(go_id = go, ensembl_gene_id = ensembl) %>%
+    dplyr::select(-evidence) #%>%
+
+    # # filter pathways by size
+    # filter(ontology == "BP") %>%
+    # group_by(go_id) %>%
+    # mutate(n_genes = n_distinct(ensembl_gene_id)) %>%
+    # ungroup() %>%
+    # filter(n_genes > 5 & n_genes < 1000)
+```
+
+
+# --- 1) GO cosine similarity hierarchical subclustering --- #
+
+```{r GR_GO_similarity}
+# GR ASD gene list (defined in notebook 02_02)
+GR_genes <- df_gene_assignments %>%
+    filter(GO_topic == "GR") %>%
+    pull(gene_name)
+
+# Build GO cosine similarity network (build_go_network defined in code/functions/build_go_network.R)
+GR_net <- build_go_network(
+    GR_genes,
+    go_mapping = go_mapping %>% filter(ontology == "BP"),
+    gene_stats = df_asd_rarevar_zscore
+)
+sim_mat     <- GR_net$sim_mat
+genes_no_go <- GR_net$no_go
+
+cat("GO similarity matrix:", nrow(sim_mat), "×", ncol(sim_mat), "\n")
+cat("Genes with no GO data:", length(genes_no_go),
+    if (length(genes_no_go) > 0) paste0(" (", paste(genes_no_go, collapse = ", "), ")") else "", "\n")
+```
+
+
+# --- 2) Hierarchical clustering of similarity matrix --- #
+
+```{r GR_cluster}
+# Ward.D2 hierarchical clustering on GO cosine distance
+# Genes not mapped to GO terms are placed by Ward.D2 variance minimization
+dist_mat <- as.dist(1 - sim_mat)
+hc <- hclust(dist_mat, method = "ward.D2")
+
+n_clusters_GR  <- 10 # starting point, will refine in section 3 
+cluster_vec_algo <- cutree(hc, k = n_clusters_GR)
+
+cat("Cluster sizes (k =", n_clusters_GR, "):\n")
+print(sort(table(cluster_vec_algo), decreasing = TRUE))
+cat("\nNo-GO gene placements:\n")
+print(cluster_vec_algo[genes_no_go])
+```
+
+
+# --- 3) Manual overrides --- #
+
+```{r GR_manual_overrides}
+# Manually define GR subclusters here so it is clearly defined;
+# these subclusters are built off of the output from section 2
+manual_cluster_overrides <- tribble(
+    ~gene_name,   ~GR_cluster,
+    # === 1) Histone & DNA modification: covalent modifiers, erasers, readers ===
+    "CREBBP",  1L, "EP300",   1L, "KANSL1",  1L, "MSL2",   1L,  # acetyltransferase complexes
+    "KMT2A",   1L, "KMT2C",   1L, "KMT2D",   1L, "KMT2E",  1L,  # H3K4 methyltransferases
+    "SETD1A",  1L, "SETD1B",  1L, "ASH1L",   1L, "SETD2",  1L,  # H3K4 / H3K36 methyltransferases
+    "NSD1",    1L, "NSD2",    1L, "KMT5B",   1L, "SETD5",  1L,  # H3K36 / H4K20 methyltransferases
+    "EHMT1",   1L, "DNMT3A",  1L,                               # H3K9 KMT / DNA methyltransferase
+    "KDM5B",   1L, "KDM6B",   1L, "PHF2",    1L,                # histone demethylases
+    "JARID2",  1L, "ASXL3",   1L,                               # PRC2 accessory / PR-DUB mark eraser
+    "BRD1",    1L, "BRD4",    1L, "MBD5",    1L, "CXXC1",  1L,  # acetyl/methyl readers, CpG binder
+    "SIN3A",   1L, "GSE1",    1L, "ANKRD11", 1L, "SETBP1", 1L,  # HDAC scaffolds / modifying-complex cofactors
+    # === 2) ATP-dependent chromatin remodelling & genome organization ===
+    "SMARCA2", 2L, "SMARCA4", 2L, "SMARCB1", 2L, "ARID1A", 2L, "ARID1B", 2L,  # SWI/SNF (BAF)
+    "CHD2",    2L, "CHD7",    2L, "CHD8",    2L,                              # CHD-family ATPases
+    "SRCAP",   2L, "EP400",   2L,                                            # SWR1/TIP60 H2A.Z exchange
+    "GATAD2B", 2L, "BAZ2A",   2L, "POGZ",    2L, "ADNP",   2L,               # NuRD / NoRC / ChAHP
+    "CTCF",    2L, "HIST1H1E",2L, "AHDC1",   2L, "TLK2",   2L,               # genome org / compaction / chromatin assembly
+    # === 3) Coactivator & general transcriptional machinery ===
+    "TAF4",    3L, "MED13",   3L, "MED13L",  3L, "CDK13",  3L,
+    "WAC",     3L, "VEZF1",   3L, "YY1",     3L,
+    # === 4) Corepressor & silencing complexes ===
+    "SKI",     4L, "TLE3",    4L, "TBL1XR1", 4L, "ZMYM2",  4L, "ZMYND8", 4L,
+    "PHF12",   4L, "PHF21A",  4L, "SPEN",    4L, "CIC",    4L, "NACC1",  4L,
+    "SLTM",    4L, "RFX7",    4L,
+    "ZNF292",  4L, "ZNF644",  4L, "ZNF865",  4L, "ZBTB7A", 4L, "ZBTB34", 4L,  # broad ZNF/ZBTB repressors
+    # === 5) RNA processing & post-transcriptional regulation ===
+    "HNRNPD",  5L, "HNRNPU",  5L, "SRSF1",   5L, "SON",    5L, "EFTUD2", 5L,
+    "SYNCRIP", 5L, "PUF60",   5L, "SCAF1",   5L, "CELF4",  5L,
+    "CNOT1",   5L, "CNOT3",   5L, "TNRC6B",  5L, "CAPRIN1",5L, "GIGYF1", 5L,
+    "INTS6",   5L, "ZCCHC14", 5L, "EEF1A2",  5L,
+    # === 6) Ubiquitin-mediated regulation & protein homeostasis ===
+    "CUL3",    6L, "FBXW7",   6L, "FBXW11",  6L, "TRIP12", 6L, "UBR5",   6L,
+    "USP7",    6L, "TRAF7",   6L, "TRIM8",   6L, "KBTBD6", 6L, "WDR26",  6L,
+    "MAGEL2",  6L, "PSMC5",   6L, "PSMD12",  6L, "RANBP2", 6L, "IRF2BPL",6L,
+    "QRICH1",  6L,
+    "DHDDS",   6L, "EMC7",    6L, "SPPL3",   6L,                              # protein-biogenesis/homeostasis (ex-SYN)
+    # === 7) PI3K-mTOR & growth signalling ===
+    "MTOR",    7L, "PTEN",    7L, "TSC2",    7L, "GSK3B",  7L,
+    "PTPN11",  7L, "PPP2R5D", 7L, "CSNK2A1", 7L, "DYRK1A", 7L,
+    # === 8) Misc / low-annotation (not plotted) ===
+    "BCAT1",   8L, "CGREF1",  8L, "DIP2C",   8L, "LEMD3",  8L,
+    "PPM1D",   8L, "TOP3B",   8L, "REV3L",   8L, "XPO1",   8L,
+    "YLPM1",   8L, "CHAMP1",  8L, "PRR12",   8L
+)
+
+# Build cluster_vec directly from the explicit assignment
+cluster_vec <- setNames(manual_cluster_overrides$GR_cluster,
+                        manual_cluster_overrides$gene_name)
+
+# Check for any GR genes left unassigned
+phantom <- setdiff(names(cluster_vec), GR_genes)
+if (length(phantom) > 0)
+    cat("NOTE: assigned genes not in GR topic:", paste(phantom, collapse = ", "), "\n")
+missing <- setdiff(GR_genes, names(cluster_vec))
+if (length(missing) > 0)
+    cat("NOTE:", length(missing), "GR genes not explicitly assigned:",
+        paste(missing, collapse = ", "), "\n")
+stopifnot(!any(duplicated(names(cluster_vec))),
+          setequal(names(cluster_vec), GR_genes))
+
+# Cluster labels:
+# modification → remodeling → 
+# coactivator → corepressor/silencing → 
+# RNA → ubiquitin → signalling →
+# misc. 
+# Developmental TFs are found in MORPH
+cluster_label_map <- tribble(
+    ~GR_cluster, ~cluster_label,                                              ~broad_category,
+    1L,          "Histone & DNA modification",                               "chromatin state",
+    2L,          "ATP-dependent chromatin remodeling & genome organization", "chromatin state",
+    3L,          "Coactivator & general transcriptional machinery",          "Transcriptional control",
+    4L,          "Corepressor & silencing complexes",                        "Transcriptional control",
+    5L,          "RNA processing & post-transcriptional regulation",         "Post-transcriptional & signaling",
+    6L,          "Ubiquitin-mediated regulation & protein homeostasis",      "Post-transcriptional & signaling",
+    7L,          "PI3K-mTOR & growth signaling",                             "Post-transcriptional & signaling",
+    8L,          "Misc / low-annotation",                                    "Misc"
+)
+
+cluster_to_label <- setNames(cluster_label_map$cluster_label,  cluster_label_map$GR_cluster)
+cluster_to_broad <- setNames(cluster_label_map$broad_category, cluster_label_map$GR_cluster)
+
+stopifnot(all(cluster_vec %in% cluster_label_map$GR_cluster))
+
+cat("Cluster sizes:\n")
+print(sort(table(cluster_vec)))
+```
+
+
+# --- 4) Export subclusters & save graph object for plot --- #
+
+```{r export_objects}
+# Export subcluster assignments
+GR_cluster_assignments <- tibble(
+    gene_name         = names(cluster_vec),
+    GR_cluster = cluster_vec,
+    cluster_label     = cluster_to_label[as.character(cluster_vec)],
+    broad_category    = cluster_to_broad[as.character(cluster_vec)]
+) %>%
+    arrange(GR_cluster, gene_name)
+
+GR_cluster_assignments %>%
+    group_by(broad_category, GR_cluster, cluster_label) %>%
+    summarise(n = n(), genes = paste(gene_name, collapse = ", "), .groups = "drop") %>%
+    arrange(GR_cluster) %>%
+    
+    write_csv(file.path(notebook_out_dir, "02_03_GR-subcluster-by-GO-similarity.csv"))
+
+# Save graph objects for plot
+saveRDS(GR_net, file = file.path(notebook_out_dir, "02_03_GR-GO-similarity-graph.RDS"))
+```
+
+
+# DEPR
+
+## dendrogram
+
+```{r GR_chromatin_dendrogram, fig.height = 10, fig.width = 7.09}
+library(dendextend)
+
+# 9 shades of GR orange (#ea801c), from near-white to full colour
+GR_color     <- topic_colors[["GR"]]
+cluster_pal_9 <- colorRampPalette(c(GR_color, "#fff0d9"))(9)  # darkest = cluster 1, lightest = misc (9)
+cluster_colors <- setNames(cluster_pal_9, seq_len(9))
+
+dend <- as.dendrogram(hc)
+leaf_colors <- cluster_colors[as.character(cluster_vec[labels(dend)])]
+dend <- dend %>%
+    set("labels_cex", 0.45) %>%
+    set("labels_col", leaf_colors) %>%
+    set("branches_lwd", 0.6)
+
+par(mar = c(4, 1, 1, 8))
+plot(dend, horiz = TRUE)
+abline(v = rev(hc$height)[n_clusters_GR - 1], lty = 2, col = "grey40", lwd = 0.8)
+```

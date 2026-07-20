@@ -1,0 +1,317 @@
+---
+title: "Fig3"
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "03_SynGO")
+```
+
+Load data for plots
+
+```{r load_data}
+# ASD rare variant data
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# Module eigengene data
+df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
+
+# Significant ASD modules
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results
+
+# CC HotNet tree (built + labelled in 03_01)
+g_cc <- readRDS(file.path(notebook_out_dir, "03_01_CC-hotnet-graph.RDS"))
+
+# Genes assigned to each HotNet
+hotnet_gene_lists <- readRDS(file.path(notebook_out_dir, "03_01_hotnet-gene-lists.RDS"))
+
+# Synaptic proteomics enrichments
+df_syn_prot <- read_xlsx(file.path(project_dir, "cmu", "synaptic_proteomics_enrichments.xlsx"))
+```
+
+
+# --- 1) Panel A: CC HotNet tree --- #
+
+Revise to synapse graphic in illustrator
+
+```{r panel_a, fig.width = 7.09, fig.height = 6.69}
+# g_cc is loaded (built + labeled in 03_01)
+
+# Extract layout to enable geom_mark_ellipse (needs explicit x/y data)
+layout_cc <- ggraph::create_layout(g_cc, layout = "tree")
+
+# HotNet node coordinates for ellipses; exclude "None" groups
+hotnet_levels <- c("Active zone", "Presynaptic membrane", "Postsynaptic specialization")
+
+
+# Combine for plot
+p_cc <- ggraph(layout_cc) +
+    scale_linetype_discrete(name = "HotNet group",
+                            limits = hotnet_levels,
+                            guide = guide_legend(
+                                ncol = 1,
+                                label.theme = element_text(size = 7)
+                            )) +
+    # Edges: black into HotNet nodes, grey otherwise
+    geom_edge_link(
+        aes(color = to_is_hotnet, edge_width = to_is_hotnet)
+    ) +
+    scale_edge_color_manual(
+        values = c("TRUE" = "black", "FALSE" = "grey50"),
+        guide  = "none"
+    ) +
+    scale_edge_width_manual(
+        values = c("TRUE" = 0.4, "FALSE" = 0.2),
+        guide  = "none"
+
+    ) +
+    # Nodes; HotNet have thicker black border & are larger
+    geom_node_point(
+        aes(fill = adj_z, size = n_all,
+            color = is_hotnet, stroke = is_hotnet),
+        shape = 21
+    ) +
+    scale_fill_gradientn(
+        colors = brewer.rdbu(100) %>% rev,
+        na.value = "grey30", limits = c(-5, 5),
+        name = expression(Z[adj])
+    ) +
+    scale_color_manual(
+        values = c("TRUE" = "black", "FALSE" = "grey50"),
+        guide  = "none"
+    ) +
+    scale_discrete_manual(aesthetics = "stroke",
+                          values = c("TRUE" = 0.5, "FALSE" = 0.15),
+                          name = "HotNet node"
+    ) +
+    scale_size_continuous(
+        range = c(2, 15),
+        breaks = seq(0, 1500, 250),
+        guide = guide_legend(nrow = 1),
+        name = "N genes in path"
+    ) +
+    
+    # All nodes labeled with full GO term name
+    geom_node_text(
+        #data = . %>% filter(is_hotnet | parent_id == "GO:0045202"),
+        aes(label = shortname %>% str_wrap(10)),
+        size = 1.8, repel = TRUE, max.overlaps = 50,
+        segment.size = 0.2, segment.color = "grey75",
+        box.padding = 0.5, min.segment.length = 0
+    ) +
+    
+    coord_fixed(ratio = 4, clip = "off") +
+    labs(title = "Synaptic compartment (CC) DNM enrichment") +
+    theme_void() +
+    theme(
+        plot.title      = element_text(size = 8, hjust = 0.5),
+        legend.position = "bottom",
+        legend.title.position = "top",
+        legend.key.height = unit(0.15, "cm"),
+        legend.key      = element_blank(),
+        legend.title    = element_text(size = 7, hjust = 0.5, face = "bold"),
+        legend.text     = element_text(size = 6),
+        legend.box = "vertical",
+        legend.justification = "left",
+        legend.panel.spacing.x = unit(3, "lines"),
+        plot.tag = element_text(facet = "bold")
+    )
+
+p_cc
+```
+
+
+# --- 2) Panel B: SYN HotNet genes bipartite --- #
+
+SYN ASD risk genes (TADA FDR < 0.001) are grouped into their SynGO HotNet neighborhoods
+(rather than unsupervised GO clusters). A gene that belongs to several HotNets appears in
+each. Edge/node design matches the GR plot — within-HotNet GO cosine similarity, k = 5
+nearest-neighbor edges, node fill by within-HotNet connection strength — with SYN colour.
+
+```{r HotNet_bipartite, fig.height = 5, fig.width = 3}
+# HotNet boxes: presynaptic (left) and postsynaptic (right) flanking the gene column
+hotnet_meta <- tibble(
+    hotnet = c("Active zone", "Presynaptic membrane", "Presynaptic ion channels",
+               "Postsynaptic organization", "Postsynaptic specialization"),
+    label  = c("Active Zone", "Membrane", "Ion Channels", "Organization", "Specialization"),
+    group  = c("pre", "pre", "pre", "post", "post")
+)
+
+# Bold/outline genes: hubs or TFs of ASD modules
+hubs <- df_module_kme %>% 
+    filter(
+        module == kME_module & 
+            module %in% df_stepwise_res$module
+    ) %>% 
+    group_by(module) %>% 
+    slice_max(kME, n = 10) %>% 
+    pull(gene_name)
+tfs <- df_stepwise_res %>% 
+    filter(study %in% c("Wamsley", "Wang")) %>% # filter for regulons
+    mutate(module_label = str_remove(module_label, "\\ .*")) %>% 
+    pull(module_label)
+nodes_to_bold <- c(hubs, tfs)
+
+# Gene nodes (centre column): SYN risk genes in >= 1 HotNet, ranked by BF (highest at top)
+# hub_tf flags hubs/TFs for a bold outline + bold label (as in the GO similarity plots).
+gene_pos <- df_asd_rarevar_zscore %>%
+    filter(FDR < 0.001 & !FLAG, gene_name %in% unlist(hotnet_gene_lists)) %>%
+    distinct(gene_name, log_BF) %>%
+    arrange(desc(log_BF)) %>%
+    mutate(gene_y = n():1,                        # highest BF -> top
+           hub_tf = gene_name %in% nodes_to_bold)
+n_genes   <- nrow(gene_pos)
+logbf_rng <- range(gene_pos$log_BF)
+
+# HotNets flank the genes: presynaptic on the LEFT (x < 0), postsynaptic on the RIGHT
+# (x > 0); each side is spread down the full height. Genes sit in the centre column (x = 0).
+hotnet_meta <- hotnet_meta %>%
+    group_by(group) %>%
+    mutate(hotnet_x = if_else(group == "pre", -1.2, 1.5),
+           hotnet_y = seq(0.88, 0.12, length.out = n()) * n_genes) %>%
+    ungroup()
+
+# One membership edge per (gene, HotNet) it belongs to; flag genes in >1 HotNet so those
+# edges can be drawn slightly darker.
+memb_edges <- tibble(hotnet    = rep(names(hotnet_gene_lists), lengths(hotnet_gene_lists)),
+                     gene_name = unlist(hotnet_gene_lists)) %>%
+    filter(gene_name %in% gene_pos$gene_name) %>%
+    left_join(dplyr::select(hotnet_meta, hotnet, hotnet_x, hotnet_y), by = "hotnet") %>%
+    left_join(dplyr::select(gene_pos, gene_name, gene_y), by = "gene_name") %>%
+    add_count(gene_name, name = "n_hotnet") %>%
+    mutate(multi = n_hotnet > 1)
+
+# Colors
+syn_color <- topic_colors[["SYN"]]
+syn_light <- colorRampPalette(c("white", syn_color))(5)[2]
+
+# Plot
+p_syn_bipartite <- ggplot() +
+    # membership edges from centre gene (x = 0) out to its HotNet on either side;
+    # genes in multiple HotNets are drawn slightly darker
+    geom_segment(data = filter(memb_edges, !multi),
+                 aes(x = 0, xend = hotnet_x, y = gene_y, yend = hotnet_y),
+                 color = "gray85", alpha = 0.5, linewidth = 0.2) +
+    geom_segment(data = filter(memb_edges, multi),
+                 aes(x = 0, xend = hotnet_x, y = gene_y, yend = hotnet_y),
+                 color = "gray55", alpha = 0.6, linewidth = 0.2) +
+    # HotNet boxes (presynaptic left, postsynaptic right) with the label inside
+    geom_label(data = hotnet_meta, aes(x = hotnet_x, y = hotnet_y, label = label),
+               fill = syn_light, color = syn_color, size = 2, fontface = "bold",
+               linewidth = 0.3, label.r = unit(0.08, "lines")) +
+    # gene nodes (centre column): fill = SYN, size = log_BF, hubs/TFs get a thicker outline
+    geom_point(data = gene_pos,
+               aes(x = 0, y = gene_y, size = log_BF, color = hub_tf, stroke = hub_tf),
+               shape = 21, fill = syn_color) +
+    geom_text(data = gene_pos,
+              aes(x = 0.07, y = gene_y, label = gene_name,
+                  fontface = if_else(hub_tf, "bold", "plain")),
+              hjust = 0, size = 1.6) +
+    scale_color_manual(values = c("TRUE" = "black", "FALSE" = "gray90"), guide = "none") +
+    scale_discrete_manual(aesthetics = "stroke", values = c("TRUE" = 0.6, "FALSE" = 0.2),
+                          guide = "none") +
+    scale_size_continuous(range = c(1.5, 4), limits = logbf_rng, name = "log10(BF)") +
+    scale_x_continuous(limits = c(-1.7, 2.0)) +
+    coord_cartesian(clip = "off") +
+    theme_void() +
+    theme(
+        legend.key.size = unit(0.25, "cm"),
+        legend.text     = element_text(size = 5),
+        legend.title    = element_text(size = 6),
+        legend.margin = margin(l = -50)
+    )
+p_syn_bipartite
+```
+
+
+# --- 3) Panel C: HotNet AUCell (Yundan) --- #
+
+# --- 4) Panel D: Synaptic proteomics --- #
+
+Export separately to combine with the synaptic proteomics figure
+
+```{r synaptic_proteomics_enrichment, fig.height = 2.5, fig.width = 2}
+p_fig3diii <- df_syn_prot %>%
+
+    ggplot(aes(x = -log10(FDR),
+               y = reorder_within(str_wrap(Description, 20), -FDR, domain))) +
+    geom_col(aes(fill = OR), linewidth = 0.25, width = 0.65, color = "gray80") +
+    geom_vline(xintercept = -log10(0.05), lty = 2, color = "darkgrey") +
+    facet_wrap(vars(domain), scales = "free_y", space = "free_y", ncol = 1) +
+    scale_y_reordered() +
+    scale_fill_gradientn(
+        colors = brewer.reds(100),
+        #labels = label_number(accuracy = 0.1),
+        name   = "Odds ratio"
+    ) +
+    guides(size = guide_legend(ncol = 1)) +
+    labs(x = "-log10(FDR)", y = NULL, title = NULL) +
+    coord_cartesian(clip = "off") +
+    theme(
+        panel.spacing         = unit(0.1, "cm"),
+        panel.border          = element_blank(),
+        strip.background      = element_blank(),
+        strip.text            = element_text(size = 7, margin = margin(t = 1, b = 1), face = "bold"),
+        axis.line             = element_line(color = "black", linewidth = 0.25),
+        axis.text.x           = element_text(size = 5.5),
+        axis.text.y           = element_text(size = 5.5),
+        axis.title.x          = element_text(size = 6),
+        legend.position       = "bottom",
+        legend.title.position = "top",
+        legend.box            = "horizontal",
+        legend.box.just       = "center",
+        legend.key.width      = unit(0.3, "cm"),
+        legend.key.height     = unit(0.15, "cm"),
+        legend.margin         = margin(t = -7),
+        legend.spacing        = unit(0.25, "cm"),
+        legend.title          = element_text(size = 6),
+        legend.text           = element_text(size = 5),
+        plot.margin           = margin(0, 0, 0, 0),
+        plot.title            = element_text(size = 7)
+    )
+p_fig3diii
+
+# ggsave(
+#     filename = file.path(figures_dir, "Fig3", "Fig3Diii_raw.pdf"),
+#     plot = p_fig3diii,
+#     height    = 2.4,
+#     width     = 1.5,
+#     dpi       = 300
+# )
+```
+
+
+# --- 5) Combined figure --- #
+
+```{r main_syngo_fig, fig.width = 7.09, fig.height = 9.72}
+row_top <- p_cc
+row_bottom <- p_syn_bipartite + plot_spacer() +
+    plot_layout(widths = c(1, 1))
+
+fig3_combined <- row_top / row_bottom +
+    plot_layout(heights = c(1, 1.25)) +
+    plot_annotation(tag_levels = "A") &
+    theme(plot.tag = element_text(face = "bold", size = 10))
+
+fig3_combined
+
+ggsave(
+    filename = file.path(figures_dir, "Fig3", "Fig3_raw.pdf"),
+    plot = fig3_combined,
+    height    = 9.72,
+    width     = 7.09,
+    dpi       = 300
+)
+```
+

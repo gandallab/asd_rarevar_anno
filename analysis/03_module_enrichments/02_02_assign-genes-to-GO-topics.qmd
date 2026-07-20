@@ -1,0 +1,397 @@
+---
+title: "Assign genes to GO topics"
+description: "Assignment of ASD risk genes to topics (SYN/GR/MORPH) by GO-pathway overlap"
+date: 2026-07-08
+format: html
+---
+
+Each ASD risk gene (TADA FDR < 0.001) is assigned to a single topic (SYN, GR, or
+MORPH) by counting how many of its GO Biological Process terms overlap each topic's
+characteristic GO vocabulary, then taking the topic with the greatest overlap.
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+```
+
+## 0.1 Load study data
+
+```{r load_data}
+# ASD rare variant statistics
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# Significant ASD modules
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results %>% 
+    mutate(module_label = factor(module_label, levels = unique(.$module_label)))
+
+# Module GO enrichments
+df_go_res <- readRDS(file.path(notebook_out_dir, "02_00_sig-mod-GO-enrichments.RDS"))
+
+# Module-topic gamma
+df_gamma <- readRDS(file.path(notebook_out_dir, "02_00_topic-module-gamma.RDS"))
+```
+
+## 0.2 Load GO data
+
+```{r load_GO_data}
+# GO ID to gene mapping
+go_mapping <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = keys(org.Hs.eg.db, keytype = "ENSEMBL"),
+  columns = c("GO", "ONTOLOGY"),
+  keytype = "ENSEMBL"
+) %>%
+    as_tibble() %>%
+    clean_names %>%
+    dplyr::rename(go_id = go, ensembl_gene_id = ensembl) %>%
+    dplyr::select(-evidence) #%>%
+
+    # # filter pathways by size
+    # filter(ontology == "BP") %>%
+    # group_by(go_id) %>%
+    # mutate(n_genes = n_distinct(ensembl_gene_id)) %>%
+    # ungroup() %>%
+    # filter(n_genes > 5 & n_genes < 1000)
+```
+
+
+# --- 1) Topic vocabulary & per-gene topic overlap scores --- #
+
+```{r identify_module_GO_paths}
+# Identify ASD risk genes
+asd_risk_genes <- c(df_asd_rarevar_zscore %>%
+                        filter(FDR < 0.001 & !FLAG) %>%
+                        pull(ensembl_gene_id) 
+)
+
+# Step 1: build topic vocabulary from enriched GO terms
+# joining to df_gamma to get topic assignment per module
+# (all GO IDs mapped to each topic)
+topic_vocab <- df_go_res %>%
+    filter(p_adj < 0.05, ontology == "BP") %>%
+    left_join(df_gamma %>%
+                  filter(top_topic == "yes") %>%
+                  select(module, topic),
+              by = "module") %>%
+    filter(!is.na(topic)) %>%
+    distinct(topic, go_id) %>%
+
+    # add topic label
+    mutate(
+        topic = case_when(
+            str_detect(topic, "^syn") ~ "SYN",
+            str_detect(topic, "^neu") ~ "MORPH",
+            str_detect(topic, "^gen") ~ "GR"
+        )
+    )
+
+# Step 2: Map each risk gene to all of its GO terms
+gene_go_terms <- go_mapping %>%
+    filter(ensembl_gene_id %in% asd_risk_genes,
+           ontology == "BP") %>%
+    # add gene name
+    left_join(df_asd_rarevar_zscore %>% 
+                  dplyr::select(ensembl_gene_id, gene_name)
+    ) %>%
+    distinct(gene_name, ensembl_gene_id, go_id)
+# N=3 genes are missing (no GO annotations in database): PRR12, GSE1, ZCCHC14
+
+
+# Step 3: compute per-gene topic overlap scores
+gene_topic_scores <- gene_go_terms %>%
+    
+    # combine gene-term mapping and topic-term mapping
+    left_join(topic_vocab, by = "go_id") %>%
+    
+    # count the total number of GO terms each gene is mapped to
+    group_by(gene_name, ensembl_gene_id) %>%
+    mutate(total_terms = n_distinct(go_id)) %>%
+    
+    # count the number of terms in each topic each gene is mapped to
+    group_by(gene_name, ensembl_gene_id, topic) %>%
+    summarise(
+        n_overlap = sum(!is.na(topic)),
+        total_terms = dplyr::first(total_terms),
+        .groups = "drop"
+    ) %>%
+    filter(!is.na(topic)) %>%
+    
+    # calculate the proportion of terms in each topic to the total number of terms
+    group_by(ensembl_gene_id) %>%
+    mutate(topic_share = n_overlap / sum(n_overlap)) %>%
+    slice_max(n_overlap, n = 1, with_ties = FALSE) %>%
+    ungroup %>%
+    arrange(-n_overlap/total_terms)
+```
+
+
+# --- 2) Manual assignments --- #
+
+## 2.1 Overrides
+
+```{r manual_overrides}
+# Manually override the genes whose GO-overlap call (§1.2) differs from the locked
+# final assignment, so §1.6 reproduces 2026.06.30_FINAL-gene-topic-assignment.xlsx
+# exactly (with CHR relabelled GR). One row per gene; grouped by target topic. Every
+# gene in gene_topic_scores whose §1.2 topic already matches the final is left as-is.
+manual_overrides <- tribble(
+    ~gene_name, ~topic,
+
+    # --- reassign to GR (genomic regulation / RNA processing) ---
+    "ADNP",     "GR",   # ChAHP chromatin-remodeling complex (CHD4/HP1)
+    "AHDC1",    "GR",
+    "ANKRD11",  "GR",   # HDAC3-recruiting chromatin cofactor
+    "ARID1B",   "GR",   # BAF (SWI/SNF) chromatin-remodeling subunit
+    "CHD7",     "GR",   # chromodomain helicase, SWI/SNF-related (CHD8 family)
+    "CIC",      "GR",
+    "EEF1A2",   "GR",   # translation elongation factor -> RNA processing / protein homeostasis
+    "HIST1H1E", "GR",   # histone H1.4, chromatin compaction
+    "KDM6B",    "GR",   # H3K27 demethylase, opposes PRC2
+    "MBD5",     "GR",   # methyl-CpG-binding, chromatin
+    "PTEN",     "GR",
+    "PTPN11",   "GR",
+    "SMARCB1",  "GR",   # BAF (SWI/SNF) core subunit, chromatin
+    "SPEN",     "GR",
+    "TLE3",     "GR",   # Groucho/TLE corepressor
+    "TRAF7",    "GR",
+    "VEZF1",    "GR",   # broad (non-neural) ZNF transcriptional activator
+
+    # --- reassign to MORPH (neuron development / morphogenesis) ---
+    "ATAT1",    "MORPH",
+    "BCR",      "MORPH", # Rho-GAP, RAC1/CDC42-mediated axon growth cone morphology
+    "BRSK2",    "MORPH", # brain-specific kinase, tau phosphorylation and axonal polarity
+    "CAMTA1",   "MORPH",
+    "COL4A3BP", "MORPH", # CERT, ceramide transfer, axon myelination / neurite outgrowth
+    "DEAF1",    "MORPH",
+    "DYNC1H1",  "MORPH",
+    "EXT1",     "MORPH",
+    "FOXP1",    "MORPH", # forkhead TF, cortical neuron identity
+    "MAF",      "MORPH", # bZIP TF, interneuron fate
+    "MAP1A",    "MORPH", # microtubule-associated protein, axon cytoskeleton
+    "MAPK8IP3", "MORPH",
+    "MARK2",    "MORPH", # MAP/microtubule affinity-regulating kinase, neuronal polarity
+    "MEF2C",    "MORPH", # TF specifying GABAergic interneuron fate, neuronal differentiation
+    "NR3C2",    "MORPH", # mineralocorticoid nuclear receptor TF
+    "NR4A2",    "MORPH", # NURR1 nuclear receptor, dopaminergic identity
+    "PLXNA1",   "MORPH",
+    "PPP2R1A",  "MORPH",
+    "PTCH1",    "MORPH", # Hedgehog receptor, neuronal fate specification
+    "RALGAPB",  "MORPH", # RAL-GAP, neurite outgrowth and cell polarity
+    "RFX3",     "MORPH", # RFX TF, ciliogenesis / neuronal development
+    "SOX5",     "MORPH", # SoxD TF, deep-layer neuron fate
+    "SPTBN1",   "MORPH", # spectrin βII, axon initial segment and axonal transport
+    "TAOK1",    "MORPH", # TAO kinase, microtubule stability and dendritic arborization
+    "TM9SF4",   "MORPH", # nine-TM protein, membrane homeostasis
+    "YWHAG",    "MORPH", # 14-3-3γ, tau phosphorylation and neurite outgrowth
+    "ZBTB20",   "MORPH", # BTB/ZNF TF, hippocampal / cortical development
+    "ZFHX3",    "MORPH", # ZNF-homeobox TF, neuronal differentiation
+
+    # --- reassign to SYN (synaptic transmission / ion transport) ---
+    "AP2S1",    "SYN",   # AP-2 complex σ subunit, clathrin-mediated synaptic vesicle endocytosis
+    "ARF3",     "SYN",   # ADP-ribosylation factor, Golgi vesicle trafficking
+    "CACNA1A",  "SYN",
+    "CAMK2A",   "SYN",
+    "CLTC",     "SYN",
+    "CSNK1E",   "SYN",   # CK1ε, synaptic vesicle phosphorylation / circadian
+    "DNM1",     "SYN",
+    "GNAI1",    "SYN",   # Gαi1, inhibitory GPCR signaling at synapse
+    "GNB1",     "SYN",   # Gβ subunit, synaptic GPCR signaling
+    "NBEA",     "SYN",
+    "PPP2CA",   "SYN",
+    "RAB14",    "SYN",   # Rab GTPase, endosomal vesicle trafficking
+    "SYNGAP1",  "SYN"
+)
+gene_topic_update <- gene_topic_scores %>%
+    rows_upsert(manual_overrides, by = "gene_name")
+```
+
+## 2.2 Missing genes
+
+```{r missing_genes}
+# Check for missing genes
+asd_risk_genes <- df_asd_rarevar_zscore %>% filter(FDR < 0.001 & !FLAG) %>% pull(gene_name)
+missing_genes <- setdiff(asd_risk_genes, gene_topic_update$gene_name)
+
+# Manually map missing genes
+manual_assignments <- tribble(
+    ~gene_name, ~topic,
+    "TCF20",   "MORPH",
+    "EBF3",    "MORPH",
+    "MED13L",  "GR",
+    "SRCAP",   "GR",
+    "ZNF292",  "GR",
+    "ZMYM2",   "GR",
+    "RFX7",    "GR",
+    "PRR12",   "GR",
+    "ZNF865",  "GR",
+    "SETBP1",  "GR",
+    "HIVEP2",  "MORPH", # large ZNF TF, neurodevelopmental
+    "DHDDS",   "GR",   # dolichol synthesis / N-glycosylation → protein homeostasis
+    "LMTK3",   "SYN",   # reassigned: AMPA receptor recycling at synapse
+    "PHF12",   "GR",
+    "GSE1",    "GR",
+    "NACC1",   "GR",
+    "HSF2",    "MORPH", # heat-shock TF, cortical development / migration
+    "ZNF644",  "GR",
+    "ZCCHC14", "GR",
+    "CXXC1",   "GR",
+    "MED13",   "GR",
+
+    "CHAMP1",  "GR",
+    "DIP2C",   "GR",
+    "EMC7",    "GR",   # ER membrane protein complex / protein biogenesis → protein homeostasis
+    "MKX",     "MORPH", # Mohawk homeobox TF (developmental identity factor)
+    "WDFY3",   "MORPH", # reassigned: axonal autophagy, neurodevelopmental phenotype
+    "YLPM1",   "GR",
+    "ZBTB34",  "GR",
+)
+gene_topic_final <- gene_topic_update %>%
+    dplyr::select(gene_name, topic) %>%
+    rows_upsert(manual_assignments, by = "gene_name")
+```
+
+
+# --- 3) Export
+
+## 3.1 Format (add TADA stats)
+
+```{r add_HotNet}
+# Add TADA stats
+df_gene_assignments <- gene_topic_final %>%
+
+    # TADA stats
+    left_join(
+        df_asd_rarevar_zscore %>%
+            dplyr::select(gene_name, FDR, BF)
+    ) %>%
+
+    # Final format
+    dplyr::select(gene_name, BF, FDR, GO_topic = topic) %>%
+    arrange(-BF)
+```
+
+## 3.2 Export
+
+```{r export_table}
+# Export as table for supplement
+df_gene_assignments %>% 
+    write_csv(file.path(notebook_out_dir, "02_02_gene-topic-assignment.csv"))
+```
+
+
+
+# DEPR
+
+## GO-similarity clustering of all genes into 3 groups (instead of GO overlap)
+
+Exploratory comparison: instead of assigning genes to topics by GO-vocabulary overlap
+(section 1), cluster all genes directly by pairwise GO cosine similarity (the section-2
+approach) and cut the tree into k = 3 groups. The three data-driven clusters are then
+mapped to SYN/GR/MORPH by majority overlap with the section-1 labels, and the two
+assignments are compared.
+
+## 1 GO similarity matrix for all genes
+
+```{r all_gene_go_similarity}
+# All section-1 assigned genes
+all_genes_k3 <- df_gene_assignments$gene_name
+
+gene_go_all3 <- go_mapping_full %>%
+    filter(ensembl_gene_id %in% {
+        df_asd_rarevar_zscore %>%
+            filter(gene_name %in% all_genes_k3) %>%
+            pull(ensembl_gene_id)
+    }) %>%
+    left_join(df_asd_rarevar_zscore %>% dplyr::select(ensembl_gene_id, gene_name),
+              by = "ensembl_gene_id") %>%
+    distinct(gene_name, go_id)
+
+go_mat_all3 <- gene_go_all3 %>%
+    mutate(present = 1L) %>%
+    pivot_wider(id_cols = gene_name, names_from = go_id,
+                values_from = present, values_fill = 0L) %>%
+    column_to_rownames("gene_name") %>%
+    as.matrix()
+
+sim_mat_all3 <- cos_sim_genes(go_mat_all3)
+
+# Genes with no GO annotation: included with zero similarity (placed by variance minimization)
+genes_no_go3 <- all_genes_k3[!all_genes_k3 %in% rownames(sim_mat_all3)]
+if (length(genes_no_go3) > 0) {
+    message("No GO data: ", paste(genes_no_go3, collapse = ", "))
+    n_existing <- nrow(sim_mat_all3)
+    n_new      <- length(genes_no_go3)
+    zero_rows  <- matrix(0, nrow = n_new, ncol = n_existing,
+                         dimnames = list(genes_no_go3, rownames(sim_mat_all3)))
+    zero_cols  <- matrix(0, nrow = n_existing + n_new, ncol = n_new,
+                         dimnames = list(c(rownames(sim_mat_all3), genes_no_go3), genes_no_go3))
+    sim_mat_all3 <- cbind(rbind(sim_mat_all3, zero_rows), zero_cols)
+    diag(sim_mat_all3) <- 1
+}
+
+cat("GO similarity matrix:", nrow(sim_mat_all3), "×", ncol(sim_mat_all3), "\n")
+cat("Genes with no GO data:", length(genes_no_go3), "\n")
+```
+
+## 2 Hierarchical clustering into 3 groups
+
+```{r all_gene_cluster_k3}
+# Ward.D2 hierarchical clustering on GO cosine distance, cut at k = 3
+hc_all3       <- hclust(as.dist(1 - sim_mat_all3), method = "ward.D2")
+cluster_vec_3 <- cutree(hc_all3, k = 3)
+
+cat("Raw cluster sizes (k = 3):\n")
+print(table(cluster_vec_3))
+```
+
+## 3 Map clusters to topic labels & compare to section 1
+
+```{r compare_k3_to_section1}
+# Tibble of cluster ID + section-1 GO topic per gene
+df_k3 <- tibble(
+    gene_name      = names(cluster_vec_3),
+    sim_cluster    = cluster_vec_3
+) %>%
+    left_join(df_gene_assignments %>% dplyr::select(gene_name, GO_topic), by = "gene_name")
+
+# Map each data-driven cluster to the topic it most overlaps in section 1
+cluster_to_topic <- df_k3 %>%
+    filter(!is.na(GO_topic)) %>%
+    count(sim_cluster, GO_topic) %>%
+    group_by(sim_cluster) %>%
+    slice_max(n, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    dplyr::select(sim_cluster, sim_topic = GO_topic)
+
+df_k3 <- df_k3 %>%
+    left_join(cluster_to_topic, by = "sim_cluster") %>%
+    mutate(agree = sim_topic == GO_topic)
+
+# Confusion matrix: section-1 topic (rows) vs GO-similarity cluster topic (cols)
+cat("Section-1 topic (rows) × GO-similarity k=3 topic (cols):\n")
+print(table(section1 = df_k3$GO_topic, sim_k3 = df_k3$sim_topic))
+
+cat("\nOverall agreement:",
+    scales::percent(mean(df_k3$agree, na.rm = TRUE), accuracy = 0.1), "\n")
+
+# Genes where the two approaches disagree
+df_k3 %>%
+    filter(!agree) %>%
+    dplyr::select(gene_name, section1_topic = GO_topic, sim_k3_topic = sim_topic) %>%
+    arrange(section1_topic, sim_k3_topic)
+
+# All three clusters are GR dominated
+print(table(sim_cluster = df_k3$sim_cluster, section1 = df_k3$GO_topic))
+```
+
+We confirmed that unsupervised GO-similarity clustering of all genes into three groups did not recover the topic structure (all three clusters were GR-dominated; Supplementary Fig X), motivating the use of the topic-anchored vocabulary-overlap method for the primary assignment.
