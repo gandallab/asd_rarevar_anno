@@ -14,3 +14,5 @@ output/some_large_file.tsv
 /_site/
 *_cache/
 *_files/
+
+*.ai
