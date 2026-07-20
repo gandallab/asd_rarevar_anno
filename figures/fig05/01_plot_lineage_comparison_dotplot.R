@@ -536,10 +536,9 @@ count_combined <- count_perproband %>%
   left_join(count_DMN %>% dplyr::select(Gene, Group_phat = Group), by = "Gene") %>%
   mutate(
     Group_combined = case_when(
-      Group_perproband == "DDID"   & Group_phat == "DDID"   ~ "ASD-NDD",
-      Group_perproband == "NoDDID" & Group_phat == "NoDDID" ~ "ASD-p",
-      Group_perproband == "DDID"   & Group_phat == "NoDDID" ~ "ASD-mixed",
-      Group_perproband == "NoDDID" & Group_phat == "DDID"   ~ "NoDDID(pp) / DDID(phat)"
+      Group_perproband == "DDID"   & Group_phat == "DDID"   ~ "ASD-DH",
+      Group_perproband == "NoDDID" & Group_phat == "NoDDID" ~ "ASD-DA",
+      Group_perproband == "DDID"   & Group_phat == "NoDDID" ~ "ASD-DL"
     )
   )
 
@@ -550,10 +549,9 @@ panel_a_scatter <- ggplot(count_combined,
   geom_hline(yintercept = p_hat_threshold, linetype = "dashed", color = "grey40") +
   scale_color_manual(
     values = c(
-      "ASD-NDD"                 = "#66C2A5",
-      "ASD-p"                   = "#FDB462",
-      "ASD-mixed"                = "grey50",
-      "NoDDID(pp) / DDID(phat)"  = "grey80"
+      "ASD-DH"                 = "#FDB462",
+      "ASD-DA"                   = "#66C2A5",
+      "ASD-DL"                = "grey50"
     )
   ) +
   labs(
