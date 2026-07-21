@@ -549,8 +549,8 @@ panel_a_scatter <- ggplot(count_combined,
   geom_hline(yintercept = p_hat_threshold, linetype = "dashed", color = "grey40") +
   scale_color_manual(
     values = c(
-      "ASD-DH"                 = "#FDB462",
-      "ASD-DA"                   = "#66C2A5",
+      "ASD-DH"                 = "#F79564",
+      "ASD-DA"                   = "#68C3a5",
       "ASD-DL"                = "grey50"
     )
   ) +
