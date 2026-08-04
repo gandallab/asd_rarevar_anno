@@ -8,7 +8,10 @@ source(file.path("analysis", "_shared", "scdrs_aucell_helpers.R"))
 
 resultdir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/"
 aucdir <- paste0(resultdir, "WangNature/AUCell/")
-scdrsdir <- paste0(resultdir, "WangNature/scDRS/run_v8/score_file/253_genes/")
+gene_number <- 253
+trait <- "ASC_Pfdr"
+scdrsdir <- paste0(resultdir, "WangNature/scDRS/run_v8/score_file/", gene_number, "_genes/")
+group_dir <- file.path(resultdir, "WangNature/scDRS/run_v8/downstream_analysis", paste0(gene_number, "_genes"))
 
 # ============================================================
 # Global definitions
@@ -24,10 +27,6 @@ all_genesets <- gene_module %>%
   tibble::deframe()
 
 gs_order <- names(all_genesets)
-celltype_groups <- get_scdrs_celltype_groups()
-ct_order <- get_scdrs_ct_order(celltype_groups)
-group_order <- get_scdrs_group_order()
-group_map <- get_scdrs_group_map(celltype_groups)
 timepoint_order <- get_scdrs_timepoint_order()
 
 # ============================================================
@@ -54,17 +53,17 @@ lineage_df <- get_lineage_df_from_mclust(resultdir, en_labels, in_labels)
 # ============================================================
 # Build cor_input: AUC + scDRS + metadata
 # ============================================================
+whole_set <- fread(file.path(group_dir, paste0(trait, ".scdrs_group.mclust.csv")), sep = "\t")
+sig_groups <- unique(whole_set[assoc_mcp_fdr < 0.05, group])
+
 cor_input <- auc_cell %>%
   left_join(lineage_df, by = "cell_id") %>%
   left_join(meta %>% select(cell_id, Group), by = "cell_id") %>%
   left_join(scdrs_scores_raw, by = "cell_id") %>%
-  filter(!is.na(norm_score)) %>%
-  left_join(group_map, by = "lineage_label") %>%
-  filter(!is.na(cell_group)) %>%
-  mutate(
-    cell_group = factor(cell_group, levels = group_order),
-    Group = factor(Group, levels = timepoint_order)
-  )
+  filter(!is.na(norm_score), !is.na(lineage_label), mclust_group %in% sig_groups) %>%
+  mutate(Group = factor(Group, levels = timepoint_order))
+
+ct_order <- intersect(get_scdrs_canonical_order(), unique(cor_input$lineage_label))
 
 write.csv(
   cor_input,
@@ -102,12 +101,10 @@ cor_overall_ct <- purrr::map_dfr(gs_order, function(gs_name) {
     )
   })
 }) %>%
-  left_join(group_map, by = "lineage_label") %>%
   mutate(
     FDR = p.adjust(mc_pval, method = "BH"),
-    r_plot = ifelse(FDR < 0.05, r_disease, NA),
+    r_plot = ifelse(mc_pval < 0.05, r_disease, NA),
     lineage_label = factor(lineage_label, levels = ct_order),
-    cell_group = factor(cell_group, levels = group_order),
     gene_set = factor(gene_set, levels = gs_order)
   )
 
@@ -145,7 +142,6 @@ cor_results <- purrr::map_dfr(gs_order, function(gs_name) {
 
       data.frame(
         lineage_label = unique(dat$lineage_label),
-        cell_group = unique(dat$cell_group),
         Group = unique(dat$Group),
         n_cells = nrow(dat),
         r_disease = r_disease,
@@ -158,9 +154,8 @@ cor_results <- purrr::map_dfr(gs_order, function(gs_name) {
   filter(!is.na(r_disease)) %>%
   mutate(
     FDR = p.adjust(mc_pval, method = "BH"),
-    r_plot = ifelse(FDR < 0.05, r_disease, NA),
+    r_plot = ifelse(mc_pval < 0.05, r_disease, NA),
     lineage_label = factor(lineage_label, levels = ct_order),
-    cell_group = factor(cell_group, levels = group_order),
     gene_set = factor(gene_set, levels = gs_order),
     Group = factor(Group, levels = timepoint_order)
   )

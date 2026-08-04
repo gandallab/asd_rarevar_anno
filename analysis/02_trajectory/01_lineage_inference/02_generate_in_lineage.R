@@ -180,10 +180,12 @@ dat_IN_lineage_mclust <- AddMetaData(
 )
 
 dat_IN_lineage_mclust@meta.data = dat_IN_lineage_mclust@meta.data %>% mutate(mclust = paste0("INlineage_", mclust22))
-metadata_mclust <- data.frame(dat_IN_lineage_mclust[[]]) %>% select("ID",	"type",	"mclust22",	"mclust")
+
+# fold cluster 21 into 15 here, via cl_merged
+metadata_mclust <- data.frame(dat_IN_lineage_mclust[[]]) %>%
+  mutate(mclust22 = cl_merged, mclust = paste0("INlineage_", cl_merged)) %>%
+  select("ID",	"type",	"mclust22",	"mclust")
 write.csv(metadata_mclust, file = paste0(resultdir,"WangNature/slingshot/IN/IN_lineage_mclust.csv"))
-metadata_final <- data.frame(dat_IN_lineage_mclust[[]])
-write.csv(metadata_final, file = paste0(resultdir,"WangNature/slingshot/IN/IN_lineage_slingshot_results.csv"),row.names = TRUE)
 
 saveRDS(dat_IN_lineage_mclust, paste0(datapath, "dat_IN_lineage_mclust_slingshot.rds"))
 

@@ -128,26 +128,7 @@ prepare_result_data <- function(cluster_comparison_EN, cluster_comparison_IN,
   invisible(list(EN = result_EN, IN = result_IN))
 }
 
-# ── Label color helpers ────────────────────────────────────────────────────────
-get_text_color <- function(label) {
-  case_when(
-    label == "EN-L2_3-IT"        ~ "#E76254",
-    label == "EN-L2_3_4-IT"      ~ "#EFD06A",
-    label == "EN-L4-IT"          ~ "#F7AA58",
-    label == "EN-L4-IT-V1"       ~ "#EFD06A",
-    label == "EN-L5-IT"          ~ "#79C588",
-    label == "EN-L6-IT"          ~ "#7B6BB0",
-    label == "IN-MGE-PV"         ~ "#5AAE61",
-    label == "IN-MGE-SST-upper"  ~ "#762A83",
-    label == "IN-MGE-SST-deep"   ~ "#AF6EC1",
-    label == "IN-CGE-VIP"        ~ "#D85A30",
-    label == "IN-CGE-SNCG"       ~ "#74C4E8",
-    label == "IN-CGE-LAMP5"      ~ "#1F77B4",
-    TRUE                         ~ "grey40"
-  )
-}
-
-# ── Helper: combined EN+IN cluster-level heatmap (panels a/b) ─────────────────
+# ── Helper: combined EN+IN cluster-level heatmap ─────────────────
 # rows    = "both": ddid + noddid rows; "noddid": noddid only
 # show_x  = FALSE: suppress x-axis text and ticks (use when panel below shares the same columns)
 make_combined_heatmap <- function(res_EN_data, res_IN_data,
@@ -159,14 +140,12 @@ make_combined_heatmap <- function(res_EN_data, res_IN_data,
   
   df_en <- res_EN_data %>%
     mutate(cell_group = "EN",
-           x_pos      = as.numeric(factor(row_label, levels = row_label)),
-           text_color = get_text_color(label))
+           x_pos      = as.numeric(factor(row_label, levels = row_label)))
   n_en <- nrow(df_en)
   
   df_in <- res_IN_data %>%
     mutate(cell_group = "IN",
-           x_pos      = as.numeric(factor(row_label, levels = row_label)) + n_en,
-           text_color = get_text_color(label))
+           x_pos      = as.numeric(factor(row_label, levels = row_label)) + n_en)
   
   make_long_rows <- function(df, score_rows) {
     rows_list <- lapply(score_rows, function(sr) {
@@ -199,14 +178,13 @@ make_combined_heatmap <- function(res_EN_data, res_IN_data,
   x_ref    <- bind_rows(df_en, df_in) %>% arrange(x_pos)
   x_breaks <- x_ref$x_pos
   x_labels <- as.character(x_ref$row_label)
-  x_colors <- x_ref$text_color
   
   p <- ggplot(df_combined, aes(x = x_pos, y = score_type)) +
     geom_tile(aes(fill = z_val), color = "white", linewidth = 0.5) +
     geom_text(aes(label = sig_label), size = 3, color = "white") +
     scale_fill_gradientn(colours = c("#F7F7F7", "#FCBBA1", "#FB6A4A", "#CB181D", "#67000D"),
-                        name = "Z score",
-                        limits = z_limits) + 
+                         name = "Z score",
+                         limits = z_limits) + 
     scale_x_continuous(breaks = x_breaks, labels = x_labels,
                        expand = c(0.01, 0.01)) +
     scale_y_discrete(expand = c(0, 0)) +
@@ -222,8 +200,7 @@ make_combined_heatmap <- function(res_EN_data, res_IN_data,
   
   if (show_x) {
     p <- p + theme(
-      axis.text.x  = element_text(angle = 0, hjust = 1, size = 6,
-                                  colour = x_colors),
+      axis.text.x  = element_text(angle = 0, hjust = 1, size = 6),
       axis.ticks.x = element_line()
     )
   } else {
@@ -246,8 +223,8 @@ node_order_EN <- c(
 
 node_order_IN <- c(
   "4", "7", "8", "13", "19", "17", "20", "14",
-  "12", "3", "6", "10", "2", "22", "18",
-  "1", "15", "16", "5", "9", "11"
+  "12", "6", "3", "5", "10", "2", "22", "18",
+  "1", "15", "16", "9", "11"
 )
 
 whole_set <- fread(
@@ -310,7 +287,7 @@ theme_fig <- theme_classic() +
     plot.margin     = margin(5, 5, 5, 5)
   )
 
-# ── Global z limits for cluster-level heatmaps (panels a/b) ──────────────────
+# ── Global z limits for cluster-level heatmaps ──────────────────
 all_z_cluster <- c(
   res_EN$z_ddid,     res_EN$z_noddid,
   res_IN$z_ddid,     res_IN$z_noddid,
@@ -320,7 +297,7 @@ global_z_limits <- c(min(all_z_cluster, na.rm = TRUE),
                      max(all_z_cluster, na.rm = TRUE))
 message("Cluster-level z limits: ", global_z_limits[1], " - ", global_z_limits[2])
 
-# ── Panel a: cluster-level ddid vs noddid (EN + IN, both rows) ───────────────
+# ── cluster-level ddid vs noddid (EN + IN, both rows) ───────────────
 # x-axis suppressed: cluster labels are shown in the age-group panels below
 panel_a_ht <- make_combined_heatmap(
   res_EN_data = res_EN, res_IN_data = res_IN,
@@ -328,14 +305,14 @@ panel_a_ht <- make_combined_heatmap(
   show_x = FALSE, show_legend = FALSE
 )
 
-# ── Panel b: cluster-level noddid_new (per-proband, noddid row only) ──────────
+# ── cluster-level noddid_new (per-proband, noddid row only) ──────────
 panel_b_ht <- make_combined_heatmap(
   res_EN_data = res_EN_new, res_IN_data = res_IN_new,
   theme_fig = theme_fig, z_limits = global_z_limits, rows = "noddid"
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ── Build dotplot (panel c): cluster × age_group, DDID + NoDDID + NoDDID-pp ──
+# ── Build dotplot: cluster × age_group, DDID + NoDDID + NoDDID-pp ──
 # ══════════════════════════════════════════════════════════════════════════════
 library(scales)
 
@@ -428,7 +405,11 @@ df_dot <- bind_rows(
       assoc_mcp < 0.05  ~ "+",
       TRUE              ~ ""
     ),
-    alpha_val = ifelse(assoc_mcp < 0.05, 1, 0.25),
+    alpha_val = case_when(
+      fdr_joint < 0.05  ~ 1,
+      assoc_mcp < 0.05  ~ 0.5,
+      TRUE              ~ 0.25
+    ),
     trait     = factor(trait, levels = c("DDID", "NoDDID", "NoDDID (per-proband)"))
   )
 
@@ -493,7 +474,7 @@ panel_c_dot <- ggplot(df_dot, aes(x = line_label, y = age_group)) +
   labs(x = NULL, y = NULL) +
   theme_classic() + theme_fig +
   theme(
-    axis.text.x      = element_text(angle = 0, hjust = 1, size = 5.5),
+    axis.text.x      = element_text(angle = 90, hjust = 1, size = 5.5),
     axis.text.y      = element_text(size = 6),
     strip.text       = element_text(size = 6, face = "bold"),
     strip.background = element_blank(),
@@ -517,7 +498,7 @@ write.table(
 message("Saved dotplot data.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ── Panel a: mutation rate scatter plot ───────────────────────────────────────
+# ── mutation rate scatter plot ───────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
 count_perproband <- fread(
   "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/RVAS_result/full_results_fdr001_PtvMis2Del_perproband_group.txt",
@@ -566,7 +547,7 @@ panel_a_scatter <- ggplot(count_combined,
 # ══════════════════════════════════════════════════════════════════════════════
 total_fig_width <- 6
 
-# panel a: scatter (left) + placeholder (right)
+# scatter (left) + placeholder (right)
 row_a <- plot_grid(
   as.grob(panel_a_scatter), NULL,
   ncol       = 2,
@@ -574,19 +555,19 @@ row_a <- plot_grid(
   labels     = c("a", ""), label_size = 8, label_fontface = "bold"
 )
 
-# panel b: cluster-level heatmap (ddid + noddid rows, no x-axis)
+# cluster-level heatmap (ddid + noddid rows, no x-axis)
 row_b <- plot_grid(
   as.grob(panel_a_ht),
   labels = "b", label_size = 8, label_fontface = "bold"
 )
 
-# panel c: cluster-level heatmap (noddid per-proband, with x-axis)
+# cluster-level heatmap (noddid per-proband, with x-axis)
 row_c <- plot_grid(
   as.grob(panel_b_ht),
   labels = "c", label_size = 8, label_fontface = "bold"
 )
 
-# panel d: dotplot (3 traits × 5 age groups)
+# dotplot (3 traits × 5 age groups)
 row_d <- plot_grid(
   as.grob(panel_c_dot),
   labels = "d", label_size = 8, label_fontface = "bold"

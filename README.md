@@ -15,7 +15,7 @@ interpretation.
 │   ├── 04_ddid_stratification/  # DD/ID comorbidity-stratified analyses
 │   └── legacy/      # Superseded notebooks (reference only)
 ├── figures/         # Manuscript figure reproduction by figure number
-│   ├── fig01/ … fig05/
+│   ├── fig01/, fig03/ … fig05/  
 │   └── supp_fig/
 ├── output/          
 │   └── manuscript/  # Submission-ready deliverables
@@ -42,9 +42,9 @@ Shared utilities used across modules:
 
 scDRS disease-relevance scoring and group-level lineage association testing.
 
-- `01_input_prep/` — prepare single-cell data (`01_0`), scDRS covariates (`01_1`), RVAS gene set (`02`), and MAGMA gene Z-scores GRCh37/38 (`03_0`–`03_2`)
+- `01_input_prep/` — prepare single-cell data (`01_0`), scDRS covariates (`01_1`), downstream group-key metadata incl. `mclust_Group_region` and `subclass_donor_region` (`01_2`), RVAS gene set (`02`), and MAGMA gene Z-scores GRCh37/38 (`03_0`–`03_2`)
 - `02_compute/` — run scDRS for RVAS (`01_run_scdrs_rvas.sh`) and GWAS (`02_run_scdrs_gwas.sh`)
-- `03_group_tests/` — lineage-level group association tests for RVAS and GWAS
+- `03_group_tests/` — lineage-level group association tests for RVAS and GWAS (`01`, `02`), mclust x Group x region tests pooled and paired-donor cohort (`03`, `04`), and per-donor subclass x region tests on the paired cohort (`05`)
 
 ### `analysis/02_trajectory/`
 
@@ -81,12 +81,11 @@ raw data here.
 
 | Directory | Contents |
 |-----------|----------|
-| `fig01/` | scDRS UMAP, lineage z-score, and trajectory plots |
-| `fig02/` | Topic × scDRS correlation |
+| `fig01/` | scDRS UMAP (`01`), lineage z-score (`02`), trajectory (`03`), and paired PFC/V1 per-donor subclass Z-score dumbbell plots (`04`) |
 | `fig03/` | AUCell proportion heatmap |
-| `fig04/` | *(scripts in progress)* |
+| `fig04/` |  |
 | `fig05/` | DD/ID gene-set distribution and lineage comparison dotplot |
-| `supp_fig/` | HotNet–scDRS correlation (`01`), HotNet supplementary panels (`02`), regional enrichment burden analysis (`03`), scDRS RVAS vs GWAS group comparison (`04`) |
+| `supp_fig/` | mclust type composition markers (`00`), scDRS RVAS vs GWAS group comparison (`01`), paired PFC/V1 mclust-group Z-diff (`02`), HotNet UMAP/pseudotime (`03`), topic × scDRS correlation (`04_1`), HotNet × scDRS correlation (`04_2`), regional enrichment burden analysis (`05`) |
 
 ## Output
 
