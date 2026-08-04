@@ -1,6 +1,6 @@
 # =============================================================================
 # Burden Analysis — O/E ratio with updated gene sets
-# Gene sets: GZ=26, CP=5, TH=44
+# Gene sets: GZ=26, CP=5, TH=44 (derived below — see "Assign genes to regional factors")
 # Variants: PTV + Mis2 + Mis1
 # Cohorts: ASD_DA_Proband (N=24,839) | ASD_D_Proband (N=13,841) | ASD_Proband | Sibling (N=9,567)
 # Pairwise: 24 tests total, Bonferroni 0.05/24 = 0.00278
@@ -9,30 +9,92 @@
 # =============================================================================
 
 library(dplyr)
+library(tibble)
 library(readxl)
 library(data.table)
+library(openxlsx)
 
-# ── Gene sets ─────────────────────────────────────────────────────
-gene_sets <- list(
-  Germinal_Zones = c("CHD2","CREBBP","EHMT1","GIGYF1","HNRNPD","KMT2A","KMT2C",
-                     "MED13","MEIS2","PHF21A","POGZ","RFX3","SETD5","SIN3A","SPEN",
-                     "SYNCRIP","TBL1XR1","TCF4","TLK2","TRIP12","UBR5","VEZF1",
-                     "WDFY3","XPO1","ZBTB20","ZNF292"),
-  Cortical_Plate = c("KDM6B","MEF2C","MYT1L","NR4A2","SATB2"),
-  Thalamus = sort(c("AHDC1","ANK2","AP2S1","ARID1B","ASH1L","ASXL3","AUTS2",
-                    "BRSK2","CAPRIN1","CSNK1E","CSNK2A1","CTNNB1","CUL3",
-                    "DEAF1","DLG4","DNMT3A","DYNC1H1","DYRK1A","FBXO11",
-                    "GABBR2","GRIA2","GRIN2B","IRF2BPL","KCNMA1","KCNQ3",
-                    "NAA15","NCKAP1","NF1","NRXN1","PACS1","PPP3CA","PRR12",
-                    "PSMD12","PTEN","SCN2A","SHANK2","STXBP1","SYNGAP1",
-                    "SYT1","TAOK1","TCF7L2","YWHAG","ZMYM2","ZMYND8"))
+datadir   <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/"
+resultdir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/"
+
+# ── Assign genes to regional factors ─────────────────────────────
+# Regional NMF factors: Factor 2 = Germinal Zones, Factor 3 = Cortical Plate, Factor 5 = Thalamus
+# (Factor 1 = Subplate and Factor 4 = Caudate & Putamen are not spatial regions used here.)
+#
+# Assignment rule
+#   1. Restrict to genes in the RVAS FDR<0.001 universe (full_results_fdr001.txt).
+#   2. A gene loading on exactly one of factors {2,3,5} is assigned to that region ("Unique member").
+#   3. A gene loading on >1 of factors {2,3,5} is assigned to whichever has the highest
+#      relative loading ("Highest loading").
+#   4. If the max loading is tied across >=2 of those factors, the gene is a "tie gene" and
+#      excluded entirely (e.g. ADNP, TLE3, WAC).
+#   5. A gene not loading on any of factors {2,3,5} is not used ("Not in any factor").
+#   6. Of the assigned genes, only those flagged Robust expression == TRUE go into the final
+#      burden-test gene sets 
+region_factor_map <- c(`2` = "Germinal Zones", `3` = "Cortical Plate", `5` = "Thalamus")
+region_key_map     <- c("Germinal Zones" = "Germinal_Zones",
+                        "Cortical Plate" = "Cortical_Plate",
+                        "Thalamus"       = "Thalamus")
+
+# Builds the full gene x regional-factor table — one row per FDR<0.001 gene, with
+# Yes/No + loading for each of factors 2/3/5, the resolved assignment, and the
+# robust-expression flag. 
+build_gene_factor_mapping <- function(enriched_path, fdr001_path) {
+  fdr001_genes <- fread(fdr001_path)$gene
+  enriched     <- fread(enriched_path)
+  spatial      <- enriched %>% filter(factor %in% as.integer(names(region_factor_map)))
+  
+  assign_one_gene <- function(g) {
+    rows <- spatial %>% filter(gene == g)
+    if (nrow(rows) == 0) return(list(region = "Not in any factor", reason = NA_character_))
+    if (nrow(rows) == 1) return(list(region = region_factor_map[[as.character(rows$factor)]],
+                                     reason = "Unique member"))
+    max_loading <- max(rows$relative_loading)
+    winners     <- rows %>% filter(relative_loading == max_loading)
+    if (nrow(winners) > 1) return(list(region = "Excluded (tie)",
+                                       reason = "Equal loading ≥2 factors — removed"))
+    list(region = region_factor_map[[as.character(winners$factor)]],
+         reason = paste0("Highest loading (", winners$relative_loading, ")"))
+  }
+  assignments <- lapply(fdr001_genes, assign_one_gene)
+  
+  wide_region <- function(fnum) {
+    d <- spatial %>% filter(factor == fnum) %>% select(gene, relative_loading)
+    tibble(gene = fdr001_genes) %>%
+      left_join(d, by = "gene") %>%
+      mutate(yn = if_else(is.na(relative_loading), "No", "Yes"))
+  }
+  gz <- wide_region(2); cp <- wide_region(3); th <- wide_region(5)
+  robust_lookup <- enriched %>% distinct(gene, robust_expression) %>% deframe()
+  
+  tibble(
+    Gene = fdr001_genes,
+    `Factor 2\n(GZ)?` = gz$yn,                       `Loading\n(GZ)` = gz$relative_loading,
+    `Factor 3\n(CP)?` = cp$yn,                       `Loading\n(CP)` = cp$relative_loading,
+    `Factor 5\n(TH)?` = th$yn,                       `Loading\n(TH)` = th$relative_loading,
+    `Assigned\nRegion`   = vapply(assignments, `[[`, character(1), "region"),
+    `Assignment\nReason` = vapply(assignments, `[[`, character(1), "reason"),
+    `Robust\nExpression` = if_else(robust_lookup[Gene], "Yes", "No")
+  )
+}
+
+gene_factor_mapping <- build_gene_factor_mapping(
+  enriched_path = paste0(resultdir, "region_enrichment/enriched_genes_per_factor.txt"),
+  fdr001_path   = paste0(datadir, "RVAS_result/full_results_fdr001.txt")
 )
+
+gene_sets <- gene_factor_mapping %>%
+  filter(`Assigned\nRegion` %in% names(region_key_map), `Robust\nExpression` == "Yes") %>%
+  mutate(region_key = unname(region_key_map[`Assigned\nRegion`])) %>%
+  group_by(region_key) %>%
+  summarise(genes = list(sort(Gene)), .groups = "drop") %>%
+  { setNames(.$genes, .$region_key) }
+message("Gene set sizes — ", paste(names(gene_sets), lengths(gene_sets), sep="=", collapse=", "))
 
 N <- list(ASD_DA_Proband=24839L, ASD_D_Proband=13841L, ASD_Proband=38680L, Sibling=9567L)
 
 
 # ── Load data ─────────────────────────────────────────────────────
-# Adjust paths as needed
 load_data <- function(nodd_path, ASD_D_Proband_path, full_path, kaplanis_path) {
   nodd <- read_excel(nodd_path) %>%
     mutate(count_ASD_DA_Proband = PTV_Proband + Mis2_Proband + Mis1_Proband,
@@ -165,8 +227,6 @@ run_burden <- function(dat) {
   list(oe=oe_results, dim1=dim1, dim2=dim2)
 }
 
-datadir = "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/"
-resultdir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/"
 dat <- load_data(paste0(datadir, "RVAS_result/counts_asd_noddid.xlsx"),
                  paste0(datadir, "RVAS_result/counts_asd_ddid.xlsx"),
                  paste0(datadir, "RVAS_result/full_results_wcounts_2025-10-08.txt"),
@@ -180,15 +240,37 @@ fwrite(res$oe, file = paste0(resultdir, "region_enrichment/Obeserved_expected_ra
 fwrite(res$dim1, file = paste0(resultdir, "region_enrichment/Region_comparison.csv"),sep = "\t")
 fwrite(res$dim2, file = paste0(resultdir, "region_enrichment/Cohort_comparison.csv"),sep = "\t")
 
+# ── Write manuscript supplementary table ───────────────
+# Sheet A = gene_factor_mapping, B = O/E ratios, C = cohort-pair comparisons (per region),
+# D = region-pair comparisons (per cohort). 
+table_dir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/output/manuscript/tables/"
+
+wb <- createWorkbook()
+sheets <- list(
+  "A. gene_factor_mapping" = gene_factor_mapping,
+  "B. O_E_ratio"           = res$oe,
+  "C. Cohort_comparison"   = res$dim2,
+  "D. Region_comparison"   = res$dim1
+)
+header_style <- createStyle(textDecoration = "bold", wrapText = TRUE, valign = "center")
+for (sheet_name in names(sheets)) {
+  addWorksheet(wb, sheet_name)
+  writeData(wb, sheet_name, sheets[[sheet_name]])
+  addStyle(wb, sheet_name, header_style, rows = 1, cols = seq_len(ncol(sheets[[sheet_name]])))
+  setRowHeights(wb, sheet_name, rows = 1, heights = 30)
+  freezePane(wb, sheet_name, firstRow = TRUE)
+}
+saveWorkbook(wb, file = paste0(table_dir, "TableS15_spatial_enrichment.xlsx"), overwrite = TRUE)
+
 # ── plot ──────────────────────────────────────────────────────────
 library(ggplot2); library(patchwork); library(dplyr)
 COL_ASD_DA_Proband <- "#4472C4"; COL_ASD_D_Proband <- "#C0392B"; COL_ALL <- "#2E7D32"; COL_SIB <-"#7D3C98"
-base_theme <- theme_classic(base_size = 7) +
+base_theme <- theme_classic(base_size = 6) +
   theme(axis.line=element_line(colour="black",linewidth=0.4),
         axis.ticks=element_line(colour="black",linewidth=0.4),
-        axis.text=element_text(colour="black",size=7),
-        axis.title=element_text(size=7),
-        plot.title=element_text(size=10,hjust=0.5),
+        axis.text=element_text(colour="black",size=6),
+        axis.title=element_text(size=6),
+        plot.title=element_text(size=8,hjust=0.5,face = "bold"),
         legend.position="none", panel.grid=element_blank())
 
 region_levels <- c("Thalamus\n(n=44)","Cortical plate\n(n=5)","Germinal zones\n(n=26)")
@@ -288,14 +370,14 @@ library(ggplot2)
 library(dplyr)
 df_oe <- res$oe %>%
   mutate(region = recode(region,
-      "Germinal_Zones" = "GZ",
-      "Cortical_Plate" = "CP",
-      "Thalamus" = "THL"),
-    region = factor(region,
-      levels = c("GZ", "CP", "THL")),
-    cohort = factor(cohort,
-      levels = c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling")
-    ))
+                         "Germinal_Zones" = "GZ",
+                         "Cortical_Plate" = "CP",
+                         "Thalamus" = "THL"),
+         region = factor(region,
+                         levels = c("GZ", "CP", "THL")),
+         cohort = factor(cohort,
+                         levels = c("ASD_D_Proband","ASD_DA_Proband","ASD_Proband","Sibling")
+         ))
 sig_df <- res$dim2 %>%
   mutate(region = recode(region,
                          "Germinal Zones" = "GZ",
@@ -405,14 +487,150 @@ p_pair <- ggplot(df_pair,
     legend.text     = element_text(size = 6)
   )
 
-plot <- p_oe + p_pair +
-  plot_layout(widths = c(2, 1)) +
-  plot_annotation(tag_levels = "a") &
+
+plot <- p_oe / p_pair 
+
+# ── Combine DMN-count figure and O/E-ratio figure into a single row ─
+final_plot <- (wrap_elements(full = fig) | plot) +
+  plot_layout(widths = c(1.5, 1)) +
+  plot_annotation(tag_levels = "A") &
   theme(plot.tag = element_text(size = 10, face = "bold"))
 ggsave(
-  filename = paste0(resultdir, "region_enrichment/Obeserved_expected_ratio.pdf"),
-  plot   = plot,
-  width  = 3.5,
-  height = 2.5,
+  filename = paste0(resultdir, "region_enrichment/DMN_count_and_OE_ratio.pdf"),
+  plot   = final_plot,
+  width  = 7.5,
+  height = 4,
   units  = "in"
 )
+
+# =============================================================================
+# Spatial factor (GZ/CP/TH) vs. GO topic (SYN/GR/MORPH): gene counts + Fisher's
+# exact test.
+# Plot: grouped bar chart of gene counts per topic, stratified by region
+#   (GZ/CP/TH all shown), split into robust vs non-robust spatial-factor expression.
+# Stats: Fisher's exact test (GZ vs TH only, per topic; CP excluded, underpowered),
+#   run separately for robust vs non-robust genes, reported as text only.
+# Input: TableS15 (gene -> spatial region), TableS9 (gene -> GO topic)
+# =============================================================================
+
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(patchwork)
+
+table_dir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/output/manuscript/tables/"
+
+region_df <- read_excel(paste0(table_dir, "TableS15_spatial_enrichment.xlsx"),
+                        sheet = "A. gene_factor_mapping") %>%
+  rename(gene_name = Gene, region = `Assigned\nRegion`, robust = `Robust\nExpression`) %>%
+  select(gene_name, region, robust)
+
+topic_df <- read_excel(paste0(table_dir, "TableS9_assign-genes-to-GO-topic-subcluster.xlsx"),
+                       sheet = "A. GO topic") %>%
+  select(gene_name, GO_topic)
+
+dat_all <- topic_df %>%
+  left_join(region_df, by = "gene_name") %>%
+  filter(region %in% c("Germinal Zones", "Cortical Plate", "Thalamus"))
+
+# GZ vs TH only for the Fisher test (Cortical Plate has n=7, underpowered)
+dat <- dat_all %>% filter(region %in% c("Germinal Zones", "Thalamus"))
+
+region_levels <- c("Germinal Zones", "Cortical Plate", "Thalamus")
+topic_levels  <- c("GR", "MORPH", "SYN")
+
+# ── Fisher's exact test (Germinal Zones vs Thalamus, per topic) ────────────
+# Run separately for robust vs non-robust spatial-factor expression: only the robust
+# genes go into the region burden test, so that's the primary result. The non-robust
+# version is reported for transparency.
+run_fisher_gz_th <- function(data) {
+  topics <- unique(data$GO_topic)
+  lapply(topics, function(top) {
+    a  <- sum(data$region == "Germinal Zones" & data$GO_topic == top)
+    b  <- sum(data$region == "Germinal Zones" & data$GO_topic != top)
+    cc <- sum(data$region == "Thalamus" & data$GO_topic == top)
+    d  <- sum(data$region == "Thalamus" & data$GO_topic != top)
+    ft <- fisher.test(matrix(c(a, cc, b, d), nrow = 2))
+    data.frame(topic = top,
+               n_GZ = a, total_GZ = a + b,
+               n_TH = cc, total_TH = cc + d,
+               or_GZ_vs_TH = unname(ft$estimate),
+               ci_l = ft$conf.int[1], ci_h = ft$conf.int[2],
+               p = ft$p.value)
+  }) %>% bind_rows() %>%
+    mutate(p_fdr = p.adjust(p, method = "BH"),
+           sig = case_when(
+             p_fdr < 0.001 ~ "***",
+             p_fdr < 0.01  ~ "**",
+             p_fdr < 0.05  ~ "*",
+             TRUE          ~ "ns")) %>%
+    arrange(match(topic, topic_levels))
+}
+
+fisher_or_robust   <- run_fisher_gz_th(dat %>% filter(robust == "Yes"))
+
+# ── Text report ──────────────────────────────────────────────────────────
+report_fisher <- function(fisher_or, label) {
+  cat(sprintf("Fisher's exact test: Germinal Zones vs Thalamus, per GO topic (%s)\n", label))
+  cat(strrep("-", 60), "\n")
+  for (i in seq_len(nrow(fisher_or))) {
+    r <- fisher_or[i, ]
+    cat(sprintf(
+      "%-6s  GZ: %2d/%2d (%.0f%%)   TH: %2d/%2d (%.0f%%)   OR(GZ vs TH) = %s   95%% CI [%.2f, %s]   p = %.3g (FDR p = %.3g, %s)\n",
+      r$topic, r$n_GZ, r$total_GZ, 100 * r$n_GZ / r$total_GZ,
+      r$n_TH, r$total_TH, 100 * r$n_TH / r$total_TH,
+      ifelse(is.infinite(r$or_GZ_vs_TH), "Inf", sprintf("%.2f", r$or_GZ_vs_TH)),
+      r$ci_l, ifelse(is.infinite(r$ci_h), "Inf", sprintf("%.2f", r$ci_h)),
+      r$p, r$p_fdr, r$sig
+    ))
+  }
+  cat("\n")
+}
+
+report_fisher(fisher_or_robust,   "robust spatial-factor expressed only")
+report_fisher(fisher_or_unrobust, "non-robust spatial-factor expressed only")
+
+# ── Plot: gene counts per spatial factor, stratified by GO topic ───────────
+# Split by robust-expression status: "Yes" is the set that actually goes into the
+# region burden test; "No" is assigned-but-filtered-out genes (see TableS11 sheet A).
+count_df <- dat_all %>%
+  mutate(region   = factor(region, levels = region_levels),
+         GO_topic = factor(GO_topic, levels = topic_levels),
+         robust   = factor(robust, levels = c("Yes", "No"))) %>%
+  count(GO_topic, region, robust, .drop = FALSE)
+
+base_theme <- theme_classic(base_size = 6) +
+  theme(axis.line = element_line(colour = "black", linewidth = 0.4),
+        axis.ticks = element_line(colour = "black", linewidth = 0.4),
+        axis.text = element_text(colour = "black", size = 6),
+        axis.title = element_text(size = 6),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 6),
+        legend.position = "top",
+        panel.grid = element_blank())
+
+make_count_plot <- function(robust_flag, subtitle) {
+  ggplot(count_df %>% filter(robust == robust_flag),
+         aes(x = region, y = n, fill = GO_topic)) +
+    geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+    geom_text(aes(label = n), position = position_dodge(width = 0.75),
+              vjust = -0.4, size = 2.3) +
+    scale_fill_manual(values = c(GR = "#e98024", MORPH = "#157e88", SYN = "#4b2c77")) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+    labs(x = NULL, y = "Number of genes", title = subtitle) +
+    base_theme + 
+    coord_flip()
+}
+
+p_robust   <- make_count_plot("Yes", "Robust spatial-factor expressed\n(used in burden test)")
+p_unrobust <- make_count_plot("No",  "Non-robust spatial-factor expressed\n(excluded)")
+
+p <- p_robust + p_unrobust +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "top")
+
+print(p)
+
+ggsave(
+  filename = "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/region_enrichment/spatial_topic_gene_counts.pdf",
+  plot = p, width = 6, height = 3, units = "in")

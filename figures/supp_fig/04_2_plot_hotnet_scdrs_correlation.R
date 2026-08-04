@@ -10,14 +10,16 @@ resultdir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/"
 aucdir <- paste0(resultdir, "WangNature/AUCell/")
 
 gs_order <- get_hotnet_gs_order()
-celltype_groups <- get_scdrs_celltype_groups()
-ct_order <- get_scdrs_ct_order(celltype_groups)
 timepoint_colors <- get_scdrs_timepoint_colors()
 timepoint_labels <- get_scdrs_timepoint_labels()
 timepoint_order <- get_scdrs_timepoint_order()
 
-cor_overall_ct <- fread(paste0(aucdir, "scDRS_AUCell_cor_overall_celltype.csv")) %>%
-  as.data.frame() %>%
+cor_overall_ct_raw <- fread(paste0(aucdir, "scDRS_AUCell_cor_overall_celltype.csv")) %>%
+  as.data.frame()
+
+ct_order <- intersect(get_scdrs_canonical_order(), unique(cor_overall_ct_raw$lineage_label))
+
+cor_overall_ct <- cor_overall_ct_raw %>%
   mutate(
     lineage_label = factor(lineage_label, levels = ct_order),
     gene_set = factor(gene_set, levels = gs_order),
@@ -25,6 +27,7 @@ cor_overall_ct <- fread(paste0(aucdir, "scDRS_AUCell_cor_overall_celltype.csv"))
       FDR < 0.001 ~ "***",
       FDR < 0.01 ~ "**",
       FDR < 0.05 ~ "*",
+      mc_pval < 0.05 ~ "+",
       TRUE ~ ""
     )
   )
@@ -40,7 +43,7 @@ cor_results <- fread(paste0(aucdir, "scDRS_AUCell_cor_celltype.csv")) %>%
 quintile_en_it_l4 <- fread(paste0(aucdir, "scDRS_AUCell_quintile_en_it_l4.csv")) %>%
   as.data.frame() %>%
   mutate(gene_set = factor(gene_set, levels = gs_order), Group = factor(Group, levels = timepoint_order))
-quintile_en_it_l5 <- fread(paste0(aucdir, "scDRS_AUCell_quintile_en_it_l5.csv")) %>%
+quintile_en_newborn_ipc_en <- fread(paste0(aucdir, "scDRS_AUCell_quintile_en_newborn_ipc_en.csv")) %>%
   as.data.frame() %>%
   mutate(gene_set = factor(gene_set, levels = gs_order), Group = factor(Group, levels = timepoint_order))
 quintile_en_newborn <- fread(paste0(aucdir, "scDRS_AUCell_quintile_en_newborn.csv")) %>%
@@ -50,11 +53,10 @@ quintile_ipc_en <- fread(paste0(aucdir, "scDRS_AUCell_quintile_ipc_en.csv")) %>%
   as.data.frame() %>%
   mutate(gene_set = factor(gene_set, levels = gs_order), Group = factor(Group, levels = timepoint_order))
 
-# lineage correlation plot              
-group_last_ct <- sapply(celltype_groups, function(types) types[length(types)])
-separator_xpos <- sapply(group_last_ct[-length(group_last_ct)], function(ct) {
-  which(ct_order == ct) + 0.5
-})
+# lineage correlation plot
+en_idx <- grep("^EN|^IPC", ct_order)
+separator_xpos <- if (length(en_idx) > 0 && length(en_idx) < length(ct_order)) max(en_idx) + 0.5 else NULL
+
 p_overall_ct <- ggplot() +
   geom_tile(data = expand.grid(lineage_label = ct_order, gene_set = gs_order, stringsAsFactors = FALSE),
             aes(x = lineage_label, y = gene_set),
@@ -64,8 +66,14 @@ p_overall_ct <- ggplot() +
             color = "grey85", linewidth = 0.2) +
   geom_text(data = cor_overall_ct %>% filter(sig_label != ""),
             aes(x = lineage_label, y = gene_set, label = sig_label),
-            size = 3, color = "white", vjust = 0.8) +
-  geom_vline(xintercept = separator_xpos, color = "grey40", linewidth = 0.4) +
+            size = 3, color = "white", vjust = 0.8)
+
+if (!is.null(separator_xpos)) {
+  p_overall_ct <- p_overall_ct +
+    geom_vline(xintercept = separator_xpos, color = "grey40", linewidth = 0.4)
+}
+
+p_overall_ct <- p_overall_ct +
   scale_x_discrete(limits = ct_order) +
   scale_y_discrete(limits = rev(gs_order)) +
   scale_fill_gradientn(colors = c("#2166ac", "#F7F7F7", "#b2182b"), name = "Spearman r") +
@@ -77,7 +85,7 @@ p_overall_ct <- ggplot() +
     legend.key.size = unit(0.3, "cm"),
     legend.text = element_text(size = 6)
   ) +
-  labs(title = "Overall: cell type x gene set") +
+  labs(title = "Correlation between HotNet AUC and scDRS") +
   coord_flip()
 
 ggsave(paste0(aucdir, "scDRS_AUCell_cor_overall_ct.pdf"),
@@ -88,30 +96,32 @@ sig_gs_pre <- c("Active zone", "Presynaptic membrane")
 sig_gs_post <- c("Postsynaptic organization")
 
 cor_pre <- cor_results %>%
-  filter(lineage_label %in% c("EN-L4-IT", "EN-L4-IT-V1", "EN-L5-IT"),
+  filter(lineage_label %in% c("EN-L4-IT"),
          gene_set %in% sig_gs_pre) %>%
   mutate(
     sig_label = case_when(
       FDR < 0.001 ~ "***",
       FDR < 0.01 ~ "**",
       FDR < 0.05 ~ "*",
+      mc_pval < 0.05 ~ "+",
       TRUE ~ ""
     ),
-    lineage_label = factor(lineage_label, levels = c("EN-L4-IT", "EN-L4-IT-V1", "EN-L5-IT")),
+    lineage_label = factor(lineage_label, levels = c("EN-L4-IT")),
     gene_set = factor(gene_set, levels = sig_gs_pre)
   )
 
 cor_post <- cor_results %>%
-  filter(lineage_label %in% c("IPC-EN", "EN-Newborn"),
+  filter(lineage_label %in% c("IPC-EN", "EN-Newborn", "EN-Newborn_IPC-EN"),
          gene_set == "Postsynaptic organization") %>%
   mutate(
     sig_label = case_when(
       FDR < 0.001 ~ "***",
       FDR < 0.01 ~ "**",
       FDR < 0.05 ~ "*",
+      mc_pval < 0.05 ~ "+",
       TRUE ~ ""
     ),
-    lineage_label = factor(lineage_label, levels = c("IPC-EN", "EN-Newborn"))
+    lineage_label = factor(lineage_label, levels = c("IPC-EN", "EN-Newborn", "EN-Newborn_IPC-EN"))
   ) %>%
   filter(sig_label != "") %>%
   mutate(Group = factor(Group, levels = timepoint_order))
@@ -129,7 +139,7 @@ p_pre <- ggplot(cor_pre, aes(x = Group, y = lineage_label, fill = r_disease)) +
   geom_tile(color = "grey85", linewidth = 0.2) +
   geom_text(aes(label = sig_label), size = 2.5, color = "white", vjust = 0.8) +
   fill_scale +
-  scale_y_discrete(limits = rev(c("EN-L4-IT", "EN-L4-IT-V1", "EN-L5-IT"))) +
+  scale_y_discrete(limits = rev(c("EN-L4-IT"))) +
   scale_x_discrete(labels = timepoint_labels) +
   facet_wrap(~ gene_set, nrow = 1, scales = "free_x") +
   theme_classic(base_size = 6) +
@@ -149,7 +159,7 @@ p_post <- ggplot(cor_post, aes(x = Group, y = lineage_label, fill = r_disease)) 
   geom_tile(color = "grey85", linewidth = 0.2) +
   geom_text(aes(label = sig_label), size = 2.5, color = "white", vjust = 0.8) +
   fill_scale +
-  scale_y_discrete(limits = rev(c("IPC-EN", "EN-Newborn"))) +
+  scale_y_discrete(limits = rev(c("IPC-EN", "EN-Newborn", "EN-Newborn_IPC-EN"))) +
   scale_x_discrete(labels = timepoint_labels) +
   facet_wrap(~ gene_set, nrow = 1, scales = "free_x") +
   theme_classic(base_size = 6) +
@@ -201,23 +211,24 @@ plot_quintile <- function(data, title, timepoint_colors, timepoint_labels,
 quintile_en_it_l4_sig <- quintile_en_it_l4 %>%
   filter(gene_set %in% sig_gs_pre) %>%
   mutate(gene_set = factor(gene_set, levels = sig_gs_pre))
-quintile_en_it_l5_sig <- quintile_en_it_l5 %>%
-  filter(gene_set %in% sig_gs_pre) %>%
-  mutate(gene_set = factor(gene_set, levels = sig_gs_pre))
-quintile_en_newborn_sig <- quintile_en_newborn %>%
+
+quintile_en_newborn_ipc_en_sig <- quintile_en_newborn_ipc_en %>%
   filter(gene_set %in% sig_gs_post) %>%
   mutate(gene_set = factor(gene_set, levels = sig_gs_post))
 quintile_ipc_en_sig <- quintile_ipc_en %>%
   filter(gene_set %in% sig_gs_post) %>%
   mutate(gene_set = factor(gene_set, levels = sig_gs_post))
+quintile_en_newborn_sig <- quintile_en_newborn %>%
+  filter(gene_set %in% sig_gs_post) %>%
+  mutate(gene_set = factor(gene_set, levels = sig_gs_post))
 
 p_quintile_l4_sig <- plot_quintile(quintile_en_it_l4_sig, "EN-L4-IT", timepoint_colors, timepoint_labels, FALSE, TRUE, "none")
-p_quintile_l5_sig <- plot_quintile(quintile_en_it_l5_sig, "EN-L5-IT", timepoint_colors, timepoint_labels, FALSE, TRUE, "none")
 p_quintile_ipc_sig <- plot_quintile(quintile_ipc_en_sig, "IPC-EN", timepoint_colors, timepoint_labels, TRUE, TRUE, "none")
+p_quintile_en_newborn_ipc_en_sig <- plot_quintile(quintile_en_newborn_ipc_en_sig, "EN-Newborn_IPC-EN", timepoint_colors, timepoint_labels, FALSE, TRUE, "none")
 p_quintile_newborn_sig <- plot_quintile(quintile_en_newborn_sig, "EN-Newborn", timepoint_colors, timepoint_labels, TRUE, TRUE, "right")
-      
+
 p_quintile_combined <- p_overall_ct +
-  (p_quintile_l4_sig / p_quintile_l5_sig / (p_quintile_ipc_sig + p_quintile_newborn_sig)) +
+  (p_quintile_l4_sig / (p_quintile_ipc_sig + p_quintile_en_newborn_ipc_en_sig) / (p_quintile_newborn_sig + patchwork::plot_spacer())) +
   patchwork::plot_layout(widths = c(1, 1.5))
 
 ggsave(paste0(aucdir, "scDRS_AUCell_quintile_combined.pdf"),

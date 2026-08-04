@@ -20,5 +20,5 @@ rvas_result_pfdr <- RVAS_result %>%
 
 fwrite(rvas_result_pfdr, file = paste0(datadir, "RVAS_result/full_results_wcounts_pfdr.tsv"), sep = "\t")
 fwrite(rvas_fdr001, file = "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/RVAS_result/full_results_fdr001.txt", sep = "\t")
-fwrite(rvas_fdr01, file = "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/RVAS_result/full_results_fdr01.txt", sep = "\t")
+
 
