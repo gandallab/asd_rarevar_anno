@@ -1,0 +1,371 @@
+---
+title: "Test gene sets for DNM enrichment"
+description: "Test synaptic, transcription factor, and epigenetic gene sets for ASD DNM enrichment relative to brain-expressed background"
+date: 2026-07-09
+format: html
+---
+
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "04_SynGO")
+```
+
+## 0.1 Load data
+
+Load study data
+
+```{r load_data}
+# ASC de novo mutation counts and per-gene background mutation rates
+# Damaging variants: PTV + Mis2 + Mis1; Mis0/Syn/CNV (Del/Dup) excluded
+df_asd_dnm <- read_tsv(
+    file.path(data_dir, "full_results_wcounts_2025-10-08.txt"),
+    show_col_types = FALSE
+) %>%
+    clean_names() %>%
+    select(gene, gene_id, loeuf, mu_lof, mu_mis2, mu_mis1,
+           ptv_proband, ptv_sibling,
+           mis2_proband, mis2_sibling,
+           mis1_proband, mis1_sibling,
+           del_proband, del_sibling,
+           dup_proband, dup_sibling) %>%
+    mutate(
+        mu_total   = mu_lof + mu_mis2 + mu_mis1,
+        dn_proband = ptv_proband + mis2_proband + mis1_proband, #+ del_proband + dup_proband,
+        dn_sibling = ptv_sibling + mis2_sibling + mis1_sibling #+ del_sibling + dup_sibling
+    )
+
+# Gene–topic assignments (from 02_02)
+df_gene_assignments   <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+```
+
+Load external gene sets
+
+```{r load_gene_sets}
+# Load SynGO data
+syngo_dir <- file.path(data_dir, "SynGO")
+df_syngo_annot <- read_xlsx(file.path(syngo_dir, "syngo_annotations.xlsx"))
+df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
+df_syngo_genes <- read_xlsx(file.path(syngo_dir, "syngo_genes.xlsx"))
+
+# Brain-expressed gene list (Human Protein Atlas, non-HBA definition)
+# Source: https://www.proteinatlas.org/search/NOT+tissue_category_rna%3Abrain%3Bnot+detected?format=tsv&download=yes
+df_brain <- read_tsv(
+    "https://www.proteinatlas.org/search/NOT+tissue_category_rna%3Abrain%3Bnot+detected?format=tsv&download=yes",
+    show_col_types = FALSE
+) %>%
+    clean_names()
+
+# Epigenetic regulators: Engelen et al. 2023 (doi:10.1080/15548627.2022.2139067), Supp Table S2
+df_chromatin <- read_xlsx(
+    file.path(data_dir, "gene_annotations", "kepi_a_2139067_sm6382(1).xlsx"),
+    sheet = 2, skip = 2
+) %>% clean_names()
+
+# Transcription factors: AnimalTFDB v1.01 (Ensembl IDs; 2 non-Ensembl rows excluded)
+df_tf <- read_tsv(
+    file.path(data_dir, "gene_annotations", "TFs_Ensembl_v_1.01.txt"),
+    col_names = "ensembl_gene_id",
+    show_col_types = FALSE
+) %>%
+    filter(str_starts(ensembl_gene_id, "ENSG"))
+```
+
+## 0.2 Helper function to run mutation-rate-matched permutation
+
+```{r permutation_fn}
+# For a given gene set (is_set_col = logical column in df), draw 1,000 mutation-rate-
+# matched samples from the remaining brain-expressed genes and compute the Fisher exact
+# odds ratio (OR) of proband:sibling DNMs in the gene set vs. each sampled background.
+#
+# Matching: genes binned into 10 mutation-rate deciles based on the gene set's own
+# distribution; background genes sampled proportional to those bin weights.
+run_rate_permutation <- function(df, is_set_col, n_iter = 1000, seed = 424) {
+    is_set <- df[[is_set_col]]
+
+    cutoffs    <- quantile(df$mu_total[is_set], probs = seq(0, 1, 0.1), na.rm = TRUE)
+    cutoffs[1] <- 0
+
+    df     <- df %>% mutate(mu_bin = .bincode(mu_total, breaks = cutoffs)) %>% filter(!is.na(mu_bin))
+    is_set <- df[[is_set_col]]
+
+    tbl     <- table(df$mu_bin, is_set)   # rows = bin, cols = FALSE / TRUE
+    weights <- tbl[, 2] / tbl[, 1]       # gene-set proportion per bin → sampling weight
+
+    foreground <- df %>% filter(.data[[is_set_col]])
+    background <- df %>% filter(!.data[[is_set_col]])
+    n_set      <- nrow(foreground)
+    bg_weights <- weights[as.character(background$mu_bin)]
+
+    dn_pro_fg <- sum(foreground$dn_proband)
+    dn_sib_fg <- sum(foreground$dn_sibling)
+
+    set.seed(seed)
+    map_dfr(seq_len(n_iter), function(i) {
+        idx     <- sample(nrow(background), n_set, prob = bg_weights, replace = FALSE)
+        sampled <- background[idx, ]
+        ft      <- fisher.test(matrix(
+            c(dn_pro_fg, dn_sib_fg, sum(sampled$dn_proband), sum(sampled$dn_sibling)),
+            nrow = 2, byrow = TRUE
+        ))
+        tibble(iter = i, odds_ratio = ft$estimate, p = ft$p.value)
+    })
+}
+```
+
+
+# --- 1) Synaptic genes --- #
+
+## 1.1 Define gene set and brain-expressed background
+
+```{r syn_prep}
+# SynGO genes are force-included in the brain-expressed background
+df_syn <- df_asd_dnm %>%
+    mutate(
+        is_synaptic = gene_id %in% df_syngo_genes$ensembl_id,
+        is_brain    = gene_id %in% df_brain$ensembl | is_synaptic
+    ) %>%
+    filter(is_brain, !is.na(mu_total), mu_total > 0)
+
+cat("Brain-expressed background N =", nrow(df_syn), "\n")
+cat("Synaptic gene set N =", sum(df_syn$is_synaptic), "\n")
+```
+
+## 1.2 Run permutation (1,000 iterations)
+
+```{r syn_perm}
+res_syn <- run_rate_permutation(df_syn, "is_synaptic")
+t_syn <- t.test(res_syn$odds_ratio)
+
+cat(sprintf(
+    "Synaptic: mean OR = %.2f (95%% CI: %.2f–%.2f), one-sample t-test p < 2.2e-16\n",
+    t_syn$estimate, t_syn$conf.int[1], t_syn$conf.int[2]
+))
+```
+
+
+# --- 2) Transcription factors --- #
+
+## 2.1 Define gene set
+
+```{r tf_prep}
+# TFs and epigenetic regulators are treated as mutually exclusive sets;
+# TF genes that are also chromatin remodellers are assigned to the epigenetic set
+df_tf_analysis <- df_asd_dnm %>%
+    mutate(
+        is_chromatin = gene_id %in% df_chromatin$ensembl_gene_id,
+        is_tf        = gene_id %in% df_tf$ensembl_gene_id & !is_chromatin,
+        is_brain     = gene_id %in% df_brain$ensembl | is_tf | is_chromatin
+    ) %>%
+    filter(is_brain, !is.na(mu_total), mu_total > 0)
+
+cat("Brain-expressed background N =", nrow(df_tf_analysis), "\n")
+cat("TF gene set N (excluding epigenetic regulators) =", sum(df_tf_analysis$is_tf), "\n")
+```
+
+## 2.2 Run permutation
+
+```{r tf_perm}
+res_tf <- run_rate_permutation(df_tf_analysis, "is_tf")
+t_tf <- t.test(res_tf$odds_ratio)
+
+cat(sprintf(
+    "TF: mean OR = %.2f (95%% CI: %.2f–%.2f), one-sample t-test p < 2.2e-16\n",
+    t_tf$estimate, t_tf$conf.int[1], t_tf$conf.int[2]
+))
+```
+
+
+# --- 3) Epigenetic regulators --- #
+
+## 3.1 Define gene set
+
+```{r chrom_prep}
+# Shares the same brain-expressed background as the TF analysis (df_tf_analysis)
+cat("Epigenetic regulator gene set N =", sum(df_tf_analysis$is_chromatin), "\n")
+```
+
+## 3.2 Run permutation
+
+```{r chrom_perm}
+res_chrom <- run_rate_permutation(df_tf_analysis, "is_chromatin")
+t_chrom <- t.test(res_chrom$odds_ratio)
+
+cat(sprintf(
+    "Epigenetic: mean OR = %.2f (95%% CI: %.2f–%.2f), one-sample t-test p < 2.2e-16\n",
+    t_chrom$estimate, t_chrom$conf.int[1], t_chrom$conf.int[2]
+))
+```
+
+
+# --- 4) ASD gene-GO topic lists --- #
+
+```{r GO_topic_genes}
+df_topic_analysis <- df_asd_dnm %>%
+    mutate(
+        is_GR = gene %in% c(df_gene_assignments %>% filter(GO_topic == "GR") %>% pull(gene_name)),
+        is_MORPH = gene %in% c(df_gene_assignments %>% filter(GO_topic == "MORPH") %>% pull(gene_name)),
+        is_SYN = gene %in% c(df_gene_assignments %>% filter(GO_topic == "SYN") %>% pull(gene_name)),
+        
+        is_brain     = gene_id %in% df_brain$ensembl | is_GR | is_MORPH | is_SYN 
+    ) %>%
+    filter(is_brain, !is.na(mu_total), mu_total > 0)
+
+res_topics <- map(
+    .x = c("is_GR", "is_MORPH", "is_SYN"),
+    .f = ~ run_rate_permutation(df_topic_analysis, .x)
+)
+t_topics <- map(
+    .x = 1:length(res_topics),
+    .f = ~ t.test(res_topics[[.x]]$odds_ratio)
+)
+
+cat(sprintf(
+    "GR: mean OR = %.2f (95%% CI: %.2f–%.2f), one-sample t-test p < 2.2e-16\n",
+    t_topics[[1]]$estimate, t_topics[[1]]$conf.int[1], t_topics[[1]]$conf.int[2]
+))
+cat(sprintf(
+    "MORPH: mean OR = %.2f (95%% CI: %.2f–%.2f), one-sample t-test p < 2.2e-16\n",
+    t_topics[[2]]$estimate, t_topics[[2]]$conf.int[1], t_topics[[2]]$conf.int[2]
+))
+cat(sprintf(
+    "SYN: mean OR = %.2f (95%% CI: %.2f–%.2f), one-sample t-test p < 2.2e-16\n",
+    t_topics[[3]]$estimate, t_topics[[3]]$conf.int[1], t_topics[[3]]$conf.int[2]
+))
+```
+
+
+# --- 5) Plot --- #
+
+For supplement: Distribution of odds ratios across permutations
+
+## 5.1 Gene sets (not ASD risk genes)
+
+```{r gene_set_OR, fig.width = 3.5, fig.height = 3}
+df_gene_set_OR <- bind_rows(
+    res_syn   %>% mutate(gene_set = "Synaptic"),
+    res_tf    %>% mutate(gene_set = "Transcription\nfactor"),
+    res_chrom %>% mutate(gene_set = "Epigenetic\nregulator")
+) %>%
+    mutate(gene_set = factor(
+        gene_set,
+        levels = c("Epigenetic\nregulator", "Transcription\nfactor", "Synaptic")
+    ))
+
+df_means <- df_gene_set_OR %>%
+    group_by(gene_set) %>%
+    summarise(
+        mean_or = mean(odds_ratio),
+        ci_lo   = t.test(odds_ratio)$conf.int[1],
+        ci_hi   = t.test(odds_ratio)$conf.int[2],
+        .groups = "drop"
+    )
+
+p_gene_set_OR <- ggplot(df_gene_set_OR, 
+                        aes(x = odds_ratio, y = gene_set)) +
+    geom_quasirandom(
+        aes(color = gene_set), 
+        groupOnX = FALSE, size = 0.3, alpha = 0.25
+    ) +
+    geom_point(
+        data = df_means,
+        aes(x = mean_or, y = gene_set),
+        shape = 21, fill = "white",
+        color = "black", size = 2,
+        inherit.aes = FALSE
+    ) +
+    geom_vline(xintercept = 1, lty = 2, color = "gray40") +
+    scale_color_manual(
+        values = c(topic_colors[["GR"]], topic_colors[["MORPH"]], topic_colors[["SYN"]]),
+        guide = "none"
+    ) +
+    labs(
+        x     = "Odds ratio",
+        y     = NULL,
+        title = "DNM enrichment of gene sets vs\nbrain-expressed background"
+    ) +
+    theme(
+        plot.title = element_text(size = 7),
+        axis.text.x = element_text(size = 6),
+        axis.text.y = element_text(size = 7),
+        axis.title.x = element_text(size = 6.5)
+    )
+p_gene_set_OR
+```
+
+## 5.2 ASD risk genes by GO topic
+
+```{r p_ASD_genes, fig.width = 3.5, fig.height = 3}
+df_GO_topic_OR <- bind_rows(
+    res_topics[[1]]   %>% mutate(GO_topic = "GR"),
+    res_topics[[2]]   %>% mutate(GO_topic = "MORPH"),
+    res_topics[[3]]   %>% mutate(GO_topic = "SYN")
+) %>%
+    mutate(GO_topic = factor(
+        GO_topic,
+        levels = c("GR", "MORPH", "SYN")
+    ))
+
+df_means <- df_GO_topic_OR %>%
+    group_by(GO_topic) %>%
+    summarise(
+        mean_or = mean(odds_ratio),
+        ci_lo   = t.test(odds_ratio)$conf.int[1],
+        ci_hi   = t.test(odds_ratio)$conf.int[2],
+        .groups = "drop"
+    )
+
+p_GO_topic_OR <- ggplot(df_GO_topic_OR, 
+                        aes(x = odds_ratio, y = GO_topic)) +
+    geom_quasirandom(
+        aes(color = GO_topic), 
+        groupOnX = FALSE, size = 0.3, alpha = 0.25
+    ) +
+    geom_point(
+        data = df_means,
+        aes(x = mean_or, y = GO_topic),
+        shape = 21, fill = "white",
+        color = "black", size = 2,
+        inherit.aes = FALSE
+    ) +
+    geom_vline(xintercept = 1, lty = 2, color = "gray40") +
+    scale_color_manual(
+        values = topic_colors,
+        guide = "none"
+    ) +
+    labs(
+        x     = "Odds ratio",
+        y     = NULL,
+        title = "DNM enrichment of ASD genes vs\nbrain-expressed background"
+    ) +
+    theme(
+        plot.title = element_text(size = 7),
+        axis.text.x = element_text(size = 6),
+        axis.text.y = element_text(size = 7),
+        axis.title.x = element_text(size = 6.5)
+    )
+p_GO_topic_OR
+```
+
+
+## 5.3 Combine
+
+```{r p_combine, fig.height = 3.5, fig.width = 6.5}
+p_combined <- p_gene_set_OR + p_GO_topic_OR &
+    plot_annotation(tag_levels = "A")
+ggsave(
+    file = file.path(figures_dir, "supplement", "04_00_gene-set-OR-vs-brain-bg.pdf"),
+    plot = p_combined,
+    height = 3,
+    width = 6.5,
+    dpi = 300
+)
+```

@@ -11,16 +11,14 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 # Source setup script
 project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
-
-# Set output directory for this notebook
-notebook_out_dir <- file.path(analysis_dir, "04_MORPH_MEF2C")
 ```
 
 Load data
 
 ```{r env}
-# Module HotNet enrichment results
-df_module_hotnet_ora <- readRDS(file.path(notebook_out_dir, "04_00_module-HotNet-ORA.RDS"))
+# Module SynGO & HotNet enrichment results
+df_module_hotnet_ora <- readRDS(file.path(analysis_dir, "05_MORPH_annotation", "05_00_module-HotNet-ORA.RDS"))
+df_module_syngo_ora <- readRDS(file.path(analysis_dir, "05_MORPH_annotation", "05_00_module-SynGO-ORA.RDS"))
 
 # Module + stepwise data (for hub/TF bolding in the subcluster plot)
 df_module_kme   <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
@@ -29,23 +27,27 @@ df_stepwise_res <- readRDS(
 )$lm_results
 
 # MORPH subclusters
-MORPH_net <- readRDS(file.path(notebook_out_dir, "04_01_MORPH-GO-similarity-graph.RDS"))
-df_MORPH_subclusters <- read_csv(file.path(notebook_out_dir, "04_01_MORPH-subcluster-by-GO-similarity.csv"),
+MORPH_net <- readRDS(file.path(analysis_dir, "05_MORPH_annotation", "05_01_MORPH-GO-similarity-graph.RDS"))
+df_MORPH_subclusters <- read_csv(file.path(analysis_dir, "05_MORPH_annotation", "05_01_MORPH-subcluster-by-GO-similarity.csv"),
                         show_col_types = FALSE)
 
-# MEF2C GO similarity network
-mef2c_net <- readRDS(file.path(notebook_out_dir, "04_02_MEF2C-GO-similarity-graph.RDS"))
+# GO similarity networks for every regulon with an ASD risk gene as its TF
+asd_tf_regulon_nets <- readRDS(
+    file.path(analysis_dir, "05_MORPH_annotation", "05_02_ASD-TF-regulon-GO-similarity-graphs.RDS")
+)
 
 # Gene-network memberships (used to pull the MEF2C (+) regulon genes)
-df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+#df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
 
 # Gene attributes for the MEF2C plot: GO topic (fill) + TADA stats (size / risk status)
 df_gene_assignments   <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"),
                                   show_col_types = FALSE)
 df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
 
-# MEF2C SynGO enrichments
-df_syngo_res <- readRDS(file.path(notebook_out_dir, "04_02_MEF2C-SynGO-enrichment.RDS"))
+# SynGO enrichments for every ASD-TF regulon
+df_syngo_res <- readRDS(
+    file.path(analysis_dir, "05_MORPH_annotation", "05_02_ASD-TF-regulon-SynGO-enrichment.RDS")
+)
 ```
 
 
@@ -60,106 +62,180 @@ hotnet_order <- c(
     "Presynaptic ion channels", "Postsynaptic organization"
 )
 
+# Overall SynGO synapse enrichment is shown alongside the HotNets, in its own facet so it
+# reads as a summary column rather than another neighborhood
+syngo_label <- "All synaptic"
+
 # Define HotNet domains and create label abbreviations
 df_hotnet_domain <- tibble(
-    hotnet_group = hotnet_order,
-    domain       = c("CC", "CC", "CC", "BP", "BP"),
-    prepost      = c("Presynaptic", "Presynaptic", "Postsynaptic",
+    hotnet_group = c(syngo_label, hotnet_order),
+    domain       = c(NA, "CC", "CC", "CC", "BP", "BP"),
+    prepost      = c("Overall", "Presynaptic", "Presynaptic", "Postsynaptic",
                      "Presynaptic", "Postsynaptic")
 ) %>%
     mutate(
-        hotnet_group_label = str_replace(hotnet_group, "Presynaptic", "PrS") %>% 
-            str_replace("Postsynaptic", "PoS"),
-        hotnet_group_label = ifelse(hotnet_group_label == "Active zone", "PrS active zone", hotnet_group_label) %>% factor,
-        hotnet_group       = factor(hotnet_group, levels = hotnet_order),
-        #hotnet_group_label = factor(hotnet_group_label, levels = paste0(hotnet_order, " (", domain, ")")),
+        hotnet_group_label = str_replace(hotnet_group, "Presynaptic ", "") %>%
+            str_replace("Postsynaptic ", ""),
+        hotnet_group_label = factor(hotnet_group_label, levels = unique(hotnet_group_label)),
+        hotnet_group       = factor(hotnet_group, levels = c(syngo_label, hotnet_order)),
         domain             = factor(domain,  levels = c("CC", "BP")),
-        prepost            = factor(prepost, levels = c("Presynaptic", "Postsynaptic"))
+        prepost            = factor(prepost, levels = c("Overall", "Presynaptic", "Postsynaptic"))
     )
 
-# Shared aesthetics: stroke color encodes significance tier
-sig_stroke_vals  <- c("FDR < 0.05" = "black", "p < 0.05" = "grey60")
-sig_stroke_sizes <- c("FDR < 0.05" = 0.6,     "p < 0.05" = 0.3)
+# Shared aesthetics: ring width encodes significance tier. Ring color is held constant so
+# that the color aesthetic is free to carry the odds-ratio legend (see the plot chunk)
+sig_stroke_sizes <- c("FDR < 0.05" = 0.5, "p < 0.05" = 0.2)
 
 
 # --- Modules --- #
 
-# Order modules by topic first, then by min p_value across HotNets within topic
-module_order_all <- df_module_hotnet_ora %>%
-    group_by(module, module_label, topic_label) %>%
-    summarise(min_pval = min(p_value), .groups = "drop") %>%
-    mutate(topic_label = factor(topic_label, levels = names(topic_colors))) %>%
-    arrange(topic_label, min_pval) %>%
+# Which synaptic gene set definition is shown (04_00 section 1 computes all three), and
+# which programs the panel covers. GR is tested in 04_00 and reported in the supplement,
+# but is not part of the synaptic hypothesis this panel addresses
+syngo_set_shown   <- "Synapse (CC)"
+topic_order_panel <- c("SYN", "MORPH")
+
+# Overall synapse enrichment becomes one more column alongside the HotNets
+df_syngo_shown <- df_module_syngo_ora %>%
+    filter(gene_set == syngo_set_shown, topic_label %in% topic_order_panel) %>%
+    mutate(hotnet_group = syngo_label)
+
+# Modules ordered within topic by the significance of their overall synaptic enrichment,
+# so the strongest synaptic modules lead each block
+module_order_all <- df_syngo_shown %>%
+    mutate(topic_label = factor(topic_label, levels = topic_order_panel)) %>%
+    arrange(topic_label, p_value) %>%
     pull(module_label)
 
-# Manually swap TTBK1 and NR3C1 (+) so TTBK1 (the only CHR module with CC
-# enrichment) sits adjacent to the SYN/CHR boundary
-module_order_all <- local({
-    i <- which(module_order_all == "TTBK1")
-    j <- which(module_order_all == "NR3C1 (+)")
-    if (length(i) == 1 && length(j) == 1) {
-        module_order_all[c(i, j)] <- module_order_all[c(j, i)]
-    }
-    module_order_all
-})
+# Bold the module label where the module's #1 hub by kME (or the regulon's TF) is itself
+# an ASD risk gene
+y_label_lookup <- df_stepwise_res %>%
+    distinct(module_label, hub_is_risk_gene) %>%
+    transmute(module_label = as.character(module_label),
+              md = ifelse(hub_is_risk_gene, paste0("<b>", module_label, "</b>"), module_label)) %>%
+    deframe()
 
-# Compute per-point fill color: interpolate white → topic_color by -log10(FDR)
-max_log10_fdr <- df_module_hotnet_ora %>%
-    filter(p_value < 0.05) %>%
-    mutate(v = -log10(p_adj)) %>%
-    pull(v) %>% max(na.rm = TRUE)
+# Point size encodes -log10(FDR), capped: the overall SynGO test reaches ~1e-96 where the
+# HotNet tests bottom out near 1e-7, so uncapped its points would swamp the panel. Odds
+# ratio drives fill intensity and spans ~1.3-6.6, so it needs no cap
+fdr_cap <- 10
 
-# --- Combine for plot --- #
+# Fill is precomputed as white -> topic color scaled by odds ratio, rather than mapped
+# through alpha, so points stay opaque: panel gridlines do not show through them and the
+# significance ring keeps full contrast (same approach as the Fig 2 AUCell panel)
+topic_ramps <- map(topic_colors, ~ colorRamp(c("white", .x)))
 
-# Format data for plot
-df_hotnet_ora_plot <- df_module_hotnet_ora %>%
-    filter(p_value < 0.05) %>%
-
+df_hotnet_ora_plot <- bind_rows(df_module_hotnet_ora, df_syngo_shown) %>%
+    filter(topic_label %in% topic_order_panel) %>%
+    # depleted sets would plot as faint points, reading as weak enrichment
+    filter(p_value < 0.05, fold_enrichment > 1) %>%
     mutate(
-        log10_fdr    = -log10(p_adj),
+        log10_fdr    = pmin(-log10(p_adj), fdr_cap),
         sig_tier     = if_else(p_adj < 0.05, "FDR < 0.05", "p < 0.05"),
         module_label = factor(module_label, levels = module_order_all),
-        hotnet_group = factor(hotnet_group, levels = hotnet_order),
-        fill_color   = map2_chr(log10_fdr / max_log10_fdr, topic_label, function(norm, topic) {
-            colorRampPalette(c("white", topic_colors[topic]))(100)[max(1, round(norm * 99) + 1)]
-        })
+        hotnet_group = factor(hotnet_group, levels = c(syngo_label, hotnet_order)),
+        fill_color   = map2_chr(odds_ratio / max(odds_ratio), topic_label,
+                                ~ rgb(topic_ramps[[.y]](.x), maxColorValue = 255))
     ) %>%
-    right_join(df_hotnet_domain, by = "hotnet_group") %>%
-    mutate(hotnet_group_label = factor(hotnet_group_label,
-                                       levels = levels(df_hotnet_domain$hotnet_group_label))
-           )
+    # right_join keeps a column for every HotNet, including those with nothing to plot
+    right_join(df_hotnet_domain, by = "hotnet_group")
+
+# Separators between topic blocks. Modules with no significant result are dropped from
+# the axis, so positions have to come from the modules actually drawn; the y axis is
+# reversed, so they are counted up from the bottom
+modules_drawn <- intersect(module_order_all, as.character(df_hotnet_ora_plot$module_label))
+topics_drawn  <- df_syngo_shown$topic_label[match(modules_drawn, df_syngo_shown$module_label)]
+topic_hlines  <- length(modules_drawn) -
+    head(cumsum(rle(topics_drawn)$lengths), -1) + 0.5
 ```
 
-```{r plot_module_hotnet_ora, fig.width = 2.5, fig.height = 2}
-p_module_hotnet <- df_hotnet_ora_plot %>% 
+```{r panel_a_stats}
+syn <- df_module_syngo_ora %>%
+  filter(gene_set == "Synapse (CC)") %>%
+  mutate(
+    log_or = log(odds_ratio),
+    se     = (log(ci_upper) - log(ci_lower)) / (2 * qnorm(0.975))
+  ) %>%
+  filter(is.finite(log_or), is.finite(se), se > 0,
+         topic_label %in% c("SYN", "MORPH", "GR"))
+
+
+# pooled OR + 95% CI per program (meta-analytic)
+syn %>%
+  group_by(topic_label) %>%
+  group_modify(~{
+    m <- rma(yi = .x$log_or, sei = .x$se, method = "REML")
+    tibble(k = m$k, OR = exp(m$b[1]),
+           CI_lower = exp(m$ci.lb), CI_upper = exp(m$ci.ub),
+           p_vs_null = m$pval, I2 = m$I2)
+  }) %>% ungroup()
+
+
+
+df3 <- syn %>%
+  dplyr::filter(topic_label %in% c("SYN", "MORPH", "GR")) %>%
+  dplyr::mutate(topic_label = factor(topic_label, levels = c("GR", "MORPH", "SYN")))  # GR = reference
+
+m <- rma(yi = log_or, sei = se, mods = ~ topic_label, data = df3, method = "REML")
+summary(m)
+
+# effect sizes as OR ratios relative to GR, with CIs and p-values
+data.frame(
+  term  = rownames(coef(summary(m))),
+  ratio = exp(coef(m)),                 # intercept = GR OR; others = MORPH/GR and SYN/GR
+  ci_lo = exp(m$ci.lb),
+  ci_hi = exp(m$ci.ub),
+  p     = m$pval
+)
+```
+
+
+```{r plot_module_hotnet_ora, fig.width = 2.5, fig.height = 4}
+p_module_hotnet <- df_hotnet_ora_plot %>%
     ggplot(
-        aes(x = module_label, y = hotnet_group_label,
-            size = odds_ratio, fill = fill_color, color = sig_tier)
+        aes(x = hotnet_group_label, y = module_label, size = log10_fdr)
     ) +
-    geom_point(shape = 21, stroke = 0.5, na.rm = TRUE) +
-    geom_vline(xintercept = c(5.5, 10.5), color = "gray50", linewidth = 0.4) +
-    scale_x_discrete(na.translate = FALSE) +
-    scale_y_discrete(labels = ~ str_wrap(.x, width = 19)) +
-    scale_size_continuous(range = c(1, 3), name = "Odds ratio",
+    geom_point(aes(fill = fill_color, stroke = sig_tier),
+               shape = 21, color = "black", na.rm = TRUE) +
+    # invisible: exists only to drive the grayscale odds-ratio colorbar, since fill is an
+    # identity scale and cannot produce a legend of its own
+    geom_point(aes(color = odds_ratio), shape = NA, na.rm = TRUE) +
+    # separators between GO topic groups down the module axis
+    geom_hline(yintercept = topic_hlines, color = "gray50", linewidth = 0.4) +
+    scale_x_discrete(labels = ~ str_wrap(.x, width = 12)) +
+    scale_y_discrete(limits = rev, labels = y_label_lookup, na.translate = FALSE) +
+    scale_size_continuous(range = c(1, 3.5), name = "-log10(FDR)",
+                          breaks = c(2, 5, 10), labels = c("2", "5", "≥ 10"),
                           guide = guide_legend(nrow = 1)) +
     scale_fill_identity() +
-    scale_color_manual(values = sig_stroke_vals, name = "Significance", na.value = NA,
-                       guide = guide_legend(nrow = 1,
-                                            override.aes = list(size = 3, fill = "white"))) +
-    facet_grid(rows = vars(prepost), scales = "free_y", space = "free_y") +
+    # points carry their topic color; the key is drawn white -> black so it reads as one
+    # odds-ratio scale rather than three
+    scale_color_gradientn(colors = c("white", "black"), name = "Odds ratio",
+                          na.value = NA,
+                          guide = guide_colorbar(barwidth = unit(1.4, "cm"),
+                                                 barheight = unit(0.15, "cm"))) +
+    # na.translate = FALSE keeps the empty right_join cells out of the legend key
+    scale_discrete_manual(aesthetics = "stroke", values = sig_stroke_sizes,
+                          name = "Significance", na.translate = FALSE,
+                          guide = guide_legend(nrow = 1,
+                                               override.aes = list(size = 3, fill = "white",
+                                                                   color = "black"))) +
+    facet_grid(cols = vars(prepost), scales = "free_x", space = "free_x") +
     labs(x = NULL, y = NULL,
-         title = "Module enrichment\nfor SynGO HotNet gene sets") +
+         title = "MORPH links transcriptional regulation\nto synaptic localization") +
     theme(
-        plot.title            = element_text(size = 7, hjust = 0.5),
-        axis.text.x           = element_text(size = 5, angle = 90, hjust = 1, vjust = 0, color = "black"),
-        axis.text.y           = element_text(size = 5.5, color = "black"),
+        plot.title            = element_text(size = 7, hjust = 0.5, face = "bold"),
+        axis.text.x           = element_text(size = 5, angle = 90, hjust = 1, vjust = 0.5, color = "black"),
+        axis.text.y           = ggtext::element_markdown(size = 5, color = "black"),
         strip.text            = element_text(size = 6, face = "bold"),
         strip.clip = "off",
         strip.background      = element_blank(),
         legend.position       = "bottom",
         legend.key.size       = unit(0.3, "cm"),
         legend.box            = "horizontal",
-        legend.margin         = margin(t = -5),
+        legend.box.spacing    = unit(0.1, "cm"),
+        legend.spacing.y      = unit(0.18, "cm"),
+        legend.margin         = margin(t = -2, b = 0),
         legend.text           = element_text(size = 5),
         legend.title          = element_text(size = 5),
         legend.title.position = "top",
@@ -168,6 +244,15 @@ p_module_hotnet <- df_hotnet_ora_plot %>%
     )
 
 p_module_hotnet
+
+# ggsave(
+#     filename = file.path(figures_dir, "Fig4", "Fig4A_tmp.pdf"),
+#     plot     = p_module_hotnet,
+#     height   = 4,
+#     width    = 2.5,
+#     dpi      = 300
+# )
+
 ```
 
 
@@ -190,10 +275,10 @@ node_stats <- df_gene_assignments %>%
     mutate(log_bf = log10(BF)) %>%
     dplyr::select(gene_name, GO_topic, log_bf)
 
-# Bold/outline genes: hubs + TFs of ASD modules
+# Bold/outline genes: top hub (rank 1 by kME) + TFs of ASD modules
 hubs <- df_module_kme %>%
     filter(module == kME_module & module %in% df_stepwise_res$module) %>%
-    group_by(module) %>% slice_max(kME, n = 10) %>% pull(gene_name)
+    group_by(module) %>% slice_max(kME, n = 1, with_ties = FALSE) %>% pull(gene_name)
 tfs <- df_stepwise_res %>%
     filter(study %in% c("Wamsley", "Wang")) %>%
     mutate(module_label = str_remove(module_label, "\\ .*")) %>% pull(module_label)
@@ -238,46 +323,88 @@ p_morph
 ```
 
 
-# --- 3) Panel C: MEF2C regulon GO similarity plot --- #
+# --- 3) Panel C: ASD TF regulon GO similarity plot ---
 
-```{r mef2c_network, fig.height = 3, fig.width = 3.5}
-# Build the MEF2C GO-similarity graph on ASD risk genes in the MEF2C (+) regulon:
-# each node linked to its top-3 non-zero-similarity partners (go_knn_edges)
-mef2c_genes <- df_network_data %>%
-    unnest(cols = c(data)) %>%
-    filter(module == "MEF2C_+_+") %>%
-    pull(gene_name)
-risk_genes <- df_asd_rarevar_zscore %>%
-    filter(FDR < 0.001 & !FLAG & gene_name %in% mef2c_genes) %>%
-    pull(gene_name)
-mef2c_edges <- go_knn_edges(mef2c_net$sim_mat[risk_genes, risk_genes], k_nn = 3) %>%
-    filter(similarity > 0)
-mef2c_net_for_plot <- graph_from_data_frame(mef2c_edges, directed = FALSE)
+```{r asd_tf_network, fig.height = 5, fig.width = 4}
+# Regulons shown in panels C and D. Every regulon with an ASD risk gene as its TF is
+# available in asd_tf_regulon_nets / df_syngo_res (see 04_02); list here the ones to plot
+regulons_to_plot <- c("MEF2C_+_+", "SOX11_+_+")
 
-# Shared scale limits
-sim_rng   <- E(mef2c_net_for_plot)$similarity %>% range()
-logbf_rng <- node_stats %>%
-    filter(gene_name %in% V(mef2c_net_for_plot)$name) %>%
+regulon_labels <- df_stepwise_res %>%
+    filter(module %in% regulons_to_plot) %>%
+    dplyr::select(module, module_label) %>%
+    deframe()
+
+# Regulon TF symbol, taken from the module name (e.g. MEF2C_+_+ -> MEF2C)
+regulon_tfs <- set_names(str_remove(regulons_to_plot, "_.*"), regulons_to_plot)
+
+asd_risk_genes <- df_asd_rarevar_zscore %>%
+    filter(FDR < 0.001 & !FLAG) %>%
+    pull(gene_name) %>%
+    unique()
+
+# One GO-similarity graph per regulon, over its ASD risk genes, each node linked to its
+# top-3 non-zero-similarity partners (go_knn_edges). Vertices are supplied explicitly so
+# that risk genes with no GO annotation still appear, as isolated nodes
+regulon_graphs <- map(set_names(regulons_to_plot), function(mod) {
+    risk  <- intersect(rownames(asd_tf_regulon_nets[[mod]]$sim_mat), asd_risk_genes)
+    edges <- go_knn_edges(asd_tf_regulon_nets[[mod]]$sim_mat[risk, risk], k_nn = 3) %>%
+        filter(similarity > 0)
+    graph_from_data_frame(edges, directed = FALSE, vertices = tibble(name = risk))
+})
+
+# Shared scale limits so node size and edge width mean the same thing in every panel.
+# Named separately from the panel B ranges so re-running this chunk cannot clobber them
+regulon_sim_rng   <- regulon_graphs %>% map(~ E(.x)$similarity) %>% unlist() %>% range()
+regulon_logbf_rng <- node_stats %>%
+    filter(gene_name %in% unlist(map(regulon_graphs, ~ V(.x)$name))) %>%
     pull(log_bf) %>% range(na.rm = TRUE)
 
-# Plot (single graph): only MEF2C bolded; larger node size range; GO-topic fill legend shown
-# (nodes span multiple topics here, unlike the single-topic GR / MORPH subclusters).
-p_mef2c <- plot_go_graph(
-    net = mef2c_net_for_plot, node_stats = node_stats, bold_genes = "MEF2C",
-    title = "ASD Genes in the MEF2C (+) Regulon", size_range = c(2, 6),
-    size_limits = logbf_rng, edge_limits = sim_rng, topic_legend = TRUE,
-    seed = 1221, xmult = 0.05, ymult = 0.05
-)
-p_mef2c
+# Only the TF is bolded; larger node size range than the GR / MORPH subclusters. The
+# GO-topic fill legend is drawn once, on the first panel: panels differ in which topics
+# they contain, so their fill scales are not identical and patchwork cannot merge them
+regulon_go_plots <- imap(regulon_graphs, function(g, mod) {
+    tf <- regulon_tfs[[mod]]
+    plot_go_graph(
+        net          = g,
+        # the regulon's own TF is drawn black rather than in its GO topic color, so it
+        # reads as the driver of the regulon rather than one more member of it
+        node_stats   = node_stats %>%
+            mutate(GO_topic = if_else(gene_name == tf, "TF", GO_topic)),
+        fill_values  = c(topic_colors, "TF" = "black"),
+        bold_genes   = tf,
+        title        = paste0("ASD genes in the ", regulon_labels[[mod]], " regulon"),
+        size_range   = c(2, 6),
+        size_limits  = regulon_logbf_rng,
+        # two keys only (smallest and largest node), so the legend stays compact. Rounded
+        # inward: a break outside the scale limits is silently dropped from the legend
+        size_breaks  = c(50, 125),
+        edge_limits  = regulon_sim_rng,
+        topic_legend = (mod == regulons_to_plot[1]),
+        seed         = 1221,
+        xmult        = 0.05,
+        ymult        = 0.05
+    )
+})
+
+p_regulon_go <- wrap_plots(regulon_go_plots, ncol = 1, guides = "collect") &
+    theme(
+        legend.position = "bottom",
+        legend.box = "horizontal",
+        legend.direction = "vertical",
+        legend.title.position = "top"
+    )
+p_regulon_go
 ```
 
 
-# --- 4) Panel D: MEF2C SynGO enrichment
+# --- 4) Panel D:  ASD TF regulon SynGO enrichment ---
 
-```{r mef2c_syngo, fig.height = 2.75, fig.width = 2.5}
-# Filter to top 3 SynGO terms per ontology for MEF2C
+```{r asd_tf_syngo, fig.height = 3.5, fig.width = 2.5}
+# Top 3 SynGO terms per ontology domain, for each regulon being plotted
 df_syngo_plot <- df_syngo_res %>%
-    group_by(domain) %>%
+    filter(module %in% regulons_to_plot) %>%
+    group_by(module, domain) %>%
     slice_min(order_by = p_adj, n = 3, with_ties = FALSE) %>%
     ungroup() %>%
     mutate(odds_ratio = if_else(
@@ -286,40 +413,68 @@ df_syngo_plot <- df_syngo_res %>%
         odds_ratio
     ))
 
-# Scale parameters derived from data
-fill_breaks <- as.numeric(quantile(df_syngo_plot$odds_ratio,
-                                   probs = c(0, 0.25, 0.5, 0.75, 1),
-                                   na.rm = TRUE))
-fill_values <- scales::rescale(fill_breaks)
-size_max    <- ceiling(max(df_syngo_plot$pct_module, na.rm = TRUE))
+# Consensus GO topic per regulon, so panel D fills each in its own program color
+regulon_topics <- df_module_syngo_ora %>%
+    filter(module %in% regulons_to_plot) %>%
+    distinct(module, topic_label) %>%
+    deframe()
 
-# Plot
-p_mef2c_syngo <- df_syngo_plot %>%
-    mutate(term = str_remove(term, "\\(.*") %>% str_trim()) %>% 
-    
+# Bars are filled white -> the regulon's topic color by odds ratio
+or_limits <- range(df_syngo_plot$odds_ratio[is.finite(df_syngo_plot$odds_ratio)])
+n_or_bins <- 4
+or_breaks <- exp(seq(log(or_limits[1]), log(or_limits[2]), length.out = n_or_bins + 1))
+# pin the outer edges: exp(log(x)) drifts a hair below x, which drops the largest odds
+# ratio out of the top bin and silently returns NA
+or_breaks[c(1, length(or_breaks))] <- or_limits
+
+df_syngo_plot <- df_syngo_plot %>%
+    mutate(
+        or_bin     = cut(odds_ratio, breaks = or_breaks, include.lowest = TRUE, labels = FALSE),
+        fill_color = map2_chr((or_bin - 0.5) / n_or_bins, module,
+                              ~ rgb(topic_ramps[[ regulon_topics[[.y]] ]](.x), maxColorValue = 255))
+    )
+
+# One panel per regulon
+plot_regulon_syngo <- function(mod) {
+    df_syngo_plot %>%
+    filter(module == mod) %>%
+    mutate(term = str_remove(term, "\\(.*") %>% str_trim()) %>%
+
     ggplot(aes(x = -log10(p_adj),
-               y = reorder_within(str_wrap(term, 25), -p_adj, domain))) +
-    geom_col(aes(fill = odds_ratio), linewidth = 0.25, width = 0.65, color = "gray80") +
+               y = reorder_within(str_wrap(term, 30), -p_adj, domain))) +
+    geom_col(aes(fill = fill_color), linewidth = 0.25, width = 0.65, color = "gray80") +
+    # invisible: exists only to drive the grayscale odds-ratio colorbar, since fill is an
+    # identity scale and cannot produce a legend of its own
+    geom_point(aes(color = odds_ratio), shape = NA) +
     geom_vline(xintercept = -log10(0.05), lty = 2, color = "darkgrey") +
-    facet_wrap(vars(domain), scales = "free_y", space = "free_y", ncol = 1) +
+    facet_wrap(vars(domain), scales = "free_y", space = "free_y", ncol = 1,
+               strip.position = "right") +
     scale_y_reordered() +
-    scale_fill_gradientn(
-        colors = brewer.reds(100),
-        labels = label_number(accuracy = 0.1),
-        limits = c(min(fill_breaks), max(fill_breaks)),
-        values = fill_values,
-        breaks = fill_breaks,
-        name   = "Odds ratio",
-        guide  = guide_colorsteps(even.steps = TRUE)
+    scale_fill_identity() +
+    # stepped key, using the same log-spaced bin edges as the bar fills
+    scale_color_stepsn(
+        colors    = c("white", "black"),
+        name      = "Odds ratio",
+        transform = "log10",
+        limits    = or_limits,
+        breaks    = or_breaks[-c(1, length(or_breaks))],
+        # formatted on the scale rather than by rounding the breaks, so that the limits
+        # printed by show.limits are rounded too
+        labels    = label_number(accuracy = 0.1),
+        # show.limits labels the ends of the bar; without it the top and bottom of the
+        # range are unlabeled and only the interior bin edges are shown
+        guide     = guide_coloursteps(barwidth = unit(0.15, "cm"), barheight = unit(1.2, "cm"),
+                                      show.limits = TRUE)
     ) +
     guides(size = guide_legend(ncol = 1)) +
-    labs(x = "-log10(FDR)", y = NULL, title = "MEF2C (+) SynGO enrichments") +
+    labs(x = "-log10(FDR)", y = NULL,
+         title = paste0(regulon_labels[[mod]])) +
     coord_cartesian(clip = "off") +
     theme(
         panel.spacing         = unit(0.1, "cm"),
         panel.border          = element_blank(),
         strip.background      = element_blank(),
-        strip.text            = element_text(size = 7, margin = margin(t = 1, b = 1), face = "bold"),
+        strip.text            = element_text(size = 7, margin = margin(t = 1, b = 1)),
         axis.line             = element_line(color = "black", linewidth = 0.125),
         axis.text.x           = element_text(size = 5),
         axis.text.y           = element_text(size = 5.5),
@@ -335,21 +490,25 @@ p_mef2c_syngo <- df_syngo_plot %>%
         legend.title          = element_text(size = 6),
         legend.text           = element_text(size = 5),
         plot.margin           = margin(0, 0, 0, 0),
-        plot.title            = element_text(size = 7)
+        plot.title            = element_text(size = 7, face = "bold")
     )
+}
 
-p_mef2c_syngo
+regulon_syngo_plots <- map(set_names(regulons_to_plot), plot_regulon_syngo)
+
+p_regulon_syngo <- wrap_plots(regulon_syngo_plots, ncol = 1, guides = "collect")
+p_regulon_syngo
 ```
 
 
 # --- 5) Combine panels for Fig 4 --- #
 
-```{r combine_fig, fig.height = 5, fig.width = 7.09}
+```{r combine_fig, fig.height = 9, fig.width = 7.09}
 row_top <- p_module_hotnet + wrap_elements(full = p_morph) +
     plot_layout(widths = c(1, 3))
 
-row_bottom <- wrap_elements(full = p_mef2c) + p_mef2c_syngo +
-    plot_layout(widths = c(4, 1))
+row_bottom <- wrap_elements(full = p_regulon_go) +  wrap_elements(full = p_regulon_syngo) +
+    plot_layout(widths = c(1.5, 1))
 
 fig4_combined <- row_top / row_bottom +
     plot_layout(heights = c(1, 3)) &
@@ -361,7 +520,7 @@ fig4_combined
 ggsave(
     filename = file.path(figures_dir, "Fig4", "Fig4_raw.pdf"),
     plot = fig4_combined,
-    height    = 5,
+    height    = 9,
     width     = 7.09,
     dpi       = 300
 )

@@ -3,7 +3,7 @@ title: "Fig3"
 format: html
 ---
 
-# --- 0) Setup --- #
+# --- 0) Setup ---
 
 ```{r setup}
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
@@ -11,9 +11,6 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 # Source setup script
 project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
-
-# Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "03_SynGO")
 ```
 
 Load data for plots
@@ -30,14 +27,14 @@ df_stepwise_res <- readRDS(
     file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results
 
-# CC HotNet tree (built + labelled in 03_01)
-g_cc <- readRDS(file.path(notebook_out_dir, "03_01_CC-hotnet-graph.RDS"))
+# CC HotNet tree (built + labeled in 03_01)
+g_cc <- readRDS(file.path(analysis_dir, "04_SynGO", "04_02_CC-hotnet-graph.RDS"))
 
 # Genes assigned to each HotNet
-hotnet_gene_lists <- readRDS(file.path(notebook_out_dir, "03_01_hotnet-gene-lists.RDS"))
+hotnet_gene_lists <- readRDS(file.path(analysis_dir, "04_SynGO", "04_02_hotnet-gene-lists.RDS"))
 
 # Synaptic proteomics enrichments
-df_syn_prot <- read_xlsx(file.path(project_dir, "cmu", "synaptic_proteomics_enrichments.xlsx"))
+df_syn_prot <- read_xlsx(file.path(data_dir, "proteomics", "synaptic_proteomics_enrichments.xlsx"))
 ```
 
 
@@ -125,7 +122,7 @@ p_cc <- ggraph(layout_cc) +
         legend.box = "vertical",
         legend.justification = "left",
         legend.panel.spacing.x = unit(3, "lines"),
-        plot.tag = element_text(facet = "bold")
+        plot.tag = element_text(face = "bold")
     )
 
 p_cc
@@ -148,14 +145,14 @@ hotnet_meta <- tibble(
     group  = c("pre", "pre", "pre", "post", "post")
 )
 
-# Bold/outline genes: hubs or TFs of ASD modules
-hubs <- df_module_kme %>% 
+# Bold/outline genes: top hub (rank 1 by kME) or TF of ASD modules
+hubs <- df_module_kme %>%
     filter(
-        module == kME_module & 
+        module == kME_module &
             module %in% df_stepwise_res$module
-    ) %>% 
-    group_by(module) %>% 
-    slice_max(kME, n = 10) %>% 
+    ) %>%
+    group_by(module) %>%
+    slice_max(kME, n = 1, with_ties = FALSE) %>%
     pull(gene_name)
 tfs <- df_stepwise_res %>% 
     filter(study %in% c("Wamsley", "Wang")) %>% # filter for regulons
@@ -246,7 +243,7 @@ p_fig3diii <- df_syn_prot %>%
 
     ggplot(aes(x = -log10(FDR),
                y = reorder_within(str_wrap(Description, 20), -FDR, domain))) +
-    geom_col(aes(fill = OR), linewidth = 0.25, width = 0.65, color = "gray80") +
+    geom_col(aes(fill = OR), linewidth = 0.1, width = 0.65, color = "gray20") +
     geom_vline(xintercept = -log10(0.05), lty = 2, color = "darkgrey") +
     facet_wrap(vars(domain), scales = "free_y", space = "free_y", ncol = 1) +
     scale_y_reordered() +
@@ -265,7 +262,7 @@ p_fig3diii <- df_syn_prot %>%
         strip.text            = element_text(size = 7, margin = margin(t = 1, b = 1), face = "bold"),
         axis.line             = element_line(color = "black", linewidth = 0.25),
         axis.text.x           = element_text(size = 5.5),
-        axis.text.y           = element_text(size = 5.5),
+        axis.text.y           = element_text(size = 6.0),
         axis.title.x          = element_text(size = 6),
         legend.position       = "bottom",
         legend.title.position = "top",
@@ -282,13 +279,13 @@ p_fig3diii <- df_syn_prot %>%
     )
 p_fig3diii
 
-# ggsave(
-#     filename = file.path(figures_dir, "Fig3", "Fig3Diii_raw.pdf"),
-#     plot = p_fig3diii,
-#     height    = 2.4,
-#     width     = 1.5,
-#     dpi       = 300
-# )
+ggsave(
+    filename = file.path(figures_dir, "Fig3", "Fig3Diii_raw.pdf"),
+    plot = p_fig3diii,
+    height    = 2.4,
+    width     = 1.5,
+    dpi       = 300
+)
 ```
 
 

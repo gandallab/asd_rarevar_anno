@@ -11,9 +11,6 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 # Source setup script
 project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
-
-# Directory containing most of the data objects used in this figure
-notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
 ```
 
 ## 0.0 Load data
@@ -28,10 +25,16 @@ df_stepwise_res <- readRDS(
 )$lm_results %>% 
     mutate(module = factor(module, levels = unique(.$module)))
 
-# GO topic model results
+# GO topic model results (spectral fit)
 topic_model <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-model-K3.RDS"))
 df_gamma <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-module-gamma.RDS"))
-df_beta <- readRDS(file.path(notebook_out_dir, "02_00_topic-word-beta.RDS"))
+df_beta <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-word-beta.RDS"))
+
+# Restart stability of the topic model
+topic_stability <- readRDS(
+    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+)
+df_assignment_prop <- topic_stability$assignment_prop
 
 # AUCell results
 aucell_high_prop_pct <- read.csv(
@@ -40,18 +43,18 @@ aucell_high_prop_pct <- read.csv(
 )
 
 # Gene-topic assignments
-df_gene_assignments <- read_csv(file.path(notebook_out_dir, "02_02_gene-topic-assignment.csv"))
+df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
 
 # GR subclusters
-GR_net <- readRDS(file.path(notebook_out_dir, "02_03_GR-GO-similarity-graph.RDS"))
-df_GR_subclusters <- read_csv(file.path(notebook_out_dir, "02_03_GR-subcluster-by-GO-similarity.csv"),
+GR_net <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_03_GR-GO-similarity-graph.RDS"))
+df_GR_subclusters <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_03_GR-subcluster-by-GO-similarity.csv"),
                         show_col_types = FALSE)
 
 # BrainSpan trajectories
-df_traj_topic <- readRDS(file.path(notebook_out_dir, "02_04_brainspan-ASD-gene-trajectories.RDS"))
+df_traj_topic <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_04_brainspan-ASD-gene-trajectories.RDS"))
 
 # BrainSpan prenatal t-stats
-tstat_data <- readRDS(file.path(notebook_out_dir, "02_04_brainspan-prenatal-tstats.RDS"))
+tstat_data <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_04_brainspan-prenatal-tstats.RDS"))
 df_tstats <- tstat_data$gene_tstats
 df_tstat_comparison <- tstat_data$topic_vs_background
 ```
@@ -59,17 +62,17 @@ df_tstat_comparison <- tstat_data$topic_vs_background
 ## 0.1 Prep: order modules & cell types
 
 ```{r prep_main_fig}
-# Order modules by gamma within top_topic
-df_top_topics <- df_gamma %>%
+# Consensus topic per module (the topic it is assigned to in most restarts)
+df_top_topics <- df_assignment_prop %>%
     group_by(module) %>%
-    slice_max(gamma, n = 1, with_ties = FALSE) %>%
+    slice_max(assignment_prop, n = 1, with_ties = FALSE) %>%
     select(module, top_topic = topic) %>%
     ungroup()
 
 # Initial topic-based ordering (used as the within-topic starting point for clustering)
-module_order_topic <- df_gamma %>%
-    select(module, topic, gamma) %>%
-    pivot_wider(names_from = topic, values_from = gamma) %>%
+module_order_topic <- df_assignment_prop %>%
+    select(module, topic, assignment_prop) %>%
+    pivot_wider(names_from = topic, values_from = assignment_prop) %>%
     left_join(df_top_topics, by = "module") %>%
     arrange(
         top_topic,
@@ -116,7 +119,31 @@ module_order <- purrr::map(topic_order_seq, function(topic) {
     if (length(mods) == 1) return(mods)
     sub_mat <- mat[mods, , drop = FALSE]
     hc <- hclust(dist(sub_mat), method = "complete")
-    mods[hc$order]
+    mods_ordered <- mods[hc$order]
+
+    # MORPH is the middle facet, so reversing it places the MORPH modules carrying the
+    # most SYN signal (FOXP2, ZBTB18) at the bottom edge, adjacent to the SYN block
+    if (topic == "neuron development / \nmorphogenesis") mods_ordered <- rev(mods_ordered)
+
+    # GR reversed to align developmental modules
+    if (topic == "genomic regulation / \nRNA processing") mods_ordered <- rev(mods_ordered)
+    
+    # SYN: these five modules are assigned with equal confidence and cluster too tightly
+    # for the dendrogram to give a meaningful order, so it is set by hand
+    # (listed bottom -> top as they appear in the figure)
+    if (topic == "synaptic transmission / \nion transport") {
+        mods_ordered <- c(
+            "M84-gene",          # SRCIN1
+            "IsoformM3_brown",  # PRKCE
+            "IsoformM4_yellow", # MARCH4
+            "M88-xx",           # FBXO41
+            "MEF2C_+_+"       # MEF2C (+)
+        )
+        # guard against a module silently dropping out of the figure if the SYN set changes
+        stopifnot(setequal(mods_ordered, mods))
+    }
+
+    mods_ordered
 }) %>% unlist()
 ```
 
@@ -126,10 +153,12 @@ module_order <- purrr::map(topic_order_seq, function(topic) {
 ```{r module_significance, fig.height = 3, fig.width = 2.34}
 p_mods_sig <- df_stepwise_res %>%
     
-    # add GO topic information
+    # add GO topic information (consensus assignment, as used in panel B)
     left_join(
-        df_gamma %>%
-            filter(top_topic == "yes") %>%
+        df_assignment_prop %>%
+            group_by(module) %>%
+            slice_max(assignment_prop, n = 1, with_ties = FALSE) %>%
+            ungroup() %>%
             dplyr::select(module, topic_label),
         by = join_by(module)
     ) %>%
@@ -210,7 +239,7 @@ p_mods_sig
 
 # --- 2) Panel B: Topic modeling results ---
 
-## i Word-topic probability (beta)
+## i Word-topic probability (beta from spectral fit)
 
 ```{r topic_beta, fig.height = 3, fig.width = 1}
 p_beta <- df_beta %>% 
@@ -258,7 +287,7 @@ p_beta <- df_beta %>%
 p_beta
 ```
 
-## ii Module-topic probability (gamma)
+## ii Module-topic assignment (# of assignments across topic model restarts)
 
 ```{r module_GO, fig.height = 4.12, fig.width = 1.83}
 # Bold the y-axis label for modules whose hub/TF is itself an ASD risk gene
@@ -268,16 +297,17 @@ y_label_df <- df_stepwise_res %>%
            md = ifelse(hub_is_risk_gene, paste0("<b>", module_label, "</b>"), module_label))
 y_label_lookup <- setNames(y_label_df$md, y_label_df$module_label)
 
-p_gamma <- df_gamma %>%
-    dplyr::select(-top_topic) %>% left_join(df_top_topics) %>%
+# Plot
+p_module_topic <- df_assignment_prop %>%
+    left_join(df_top_topics) %>%
     mutate(module = factor(module, levels = module_order)) %>%
-    arrange(module) %>% 
-    left_join(df_stepwise_res %>% dplyr::select(module, module_label)) %>% 
-    mutate(module_label = factor(module_label, levels = unique(.$module_label))) %>% 
+    arrange(module) %>%
+    left_join(df_stepwise_res %>% dplyr::select(module, module_label)) %>%
+    mutate(module_label = factor(module_label, levels = unique(.$module_label))) %>%
 
     ggplot(aes(x = topic_label, y = module_label)) +
     #geom_hline(yintercept = seq(1.5, nrow(df_sig_mods) - 0.5, 1), linewidth = 0.25, color = "gray") +
-    geom_tile(aes(fill = topic_label, alpha = gamma), color = NA) +
+    geom_tile(aes(fill = topic_label, alpha = assignment_prop), color = NA) +
     facet_grid(rows = vars(top_topic), scales = "free_y", space = "free_y") +
 
     scale_x_discrete(
@@ -297,8 +327,8 @@ p_gamma <- df_gamma %>%
         ),
         guide = "none"
     ) +
-    scale_alpha_continuous(range = c(0, 1), limits = c(0, 0.99),
-                           name = "strength of association") +
+    scale_alpha_continuous(range = c(0, 1), limits = c(0, 1),
+                           name = "assignment reproducibility") +
     
     coord_cartesian(clip = "off") +
     labs(x = NULL, y = NULL,
@@ -319,7 +349,7 @@ p_gamma <- df_gamma %>%
         axis.text.y = ggtext::element_markdown(size = 5, color = "black"),
         plot.margin = margin(l = 0)
     )
-p_gamma
+p_module_topic
 ```
 
 # --- 3) Panel C: AUCell enrichments ---
@@ -398,14 +428,30 @@ abbrev_name_order <- df_cell_type_order_aucell %>%
     filter(!cell_type %in% c("Unknown", "Vascular")) %>%
     pull(abbrev_name)
 
+# Pre-compute per-tile hex color: white → topic color scaled by pct_high
+topic_ramps <- map(topic_colors, ~ colorRamp(c("white", .x)))
+
 df_aucell <- aucell_high_prop_pct %>%
     as.data.frame() %>%
     tibble::rownames_to_column("module") %>%
     pivot_longer(-module, names_to = "cell_type", values_to = "pct_high") %>%
     left_join(df_cell_type_order_aucell, by = "cell_type") %>%
-    left_join(df_top_topics, by = "module") %>%
+    left_join(df_assignment_prop %>%
+                  group_by(module) %>%
+                  slice_max(assignment_prop, n = 1, with_ties = FALSE) %>%
+                  ungroup() %>%
+                  dplyr::select(module, top_topic = topic_label),
+              by = "module") %>%
     filter(!cell_type %in% c("Unknown", "Vascular"), !is.na(broad_group)) %>%
     mutate(
+        fill_color = {
+            pct_norm <- pmin(pmax(pct_high / 100, 0), 1)
+            pct_norm[is.na(pct_norm)] <- 0
+            map2_chr(pct_norm, top_topic, function(p, t) {
+                rgb_vals <- topic_ramps[[t]](p)
+                rgb(rgb_vals[1], rgb_vals[2], rgb_vals[3], maxColorValue = 255)
+            })
+        },
         abbrev_name = factor(abbrev_name, levels = abbrev_name_order),
         broad_group = factor(broad_group, levels = c("EN", "IN", "Glia")),
         sub_group   = factor(sub_group,   levels = c("Newborn", "IT", "non-IT",
@@ -415,8 +461,9 @@ df_aucell <- aucell_high_prop_pct %>%
     )
 
 p_cell_type <- df_aucell %>%
-    ggplot(aes(x = abbrev_name, y = module, fill = pct_high)) +
-    geom_tile() +
+    ggplot(aes(x = abbrev_name, y = module)) +
+    geom_tile(aes(fill = fill_color)) +
+    geom_point(aes(color = pct_high), shape = NA) +  # invisible; drives legend only
     ggh4x::facet_nested(
         rows = vars(top_topic),
         cols = vars(broad_group, sub_group),
@@ -428,11 +475,17 @@ p_cell_type <- df_aucell %>%
                                 element_rect(fill = NA, color = NA))
         )
     ) +
-    scale_fill_gradientn(
-        colors   = c("white", brewer.reds(100)),
+    scale_fill_identity(na.value = "grey90") +
+    scale_color_gradientn(
+        colors   = c("white", "black"),
         name     = "Proportion highly\nenriched (%)",
         na.value = "grey90"
     ) +
+    guides(color = guide_colorbar(
+        barwidth  = unit(1.5, "cm"),
+        barheight = unit(0.15, "cm"),
+        title.position = "top"
+    )) +
     labs(x = NULL, y = NULL,
          title = "AUCell module enrichment by cell type") +
     theme(
@@ -596,37 +649,8 @@ p_tstat_distr <- df_tstats %>%
 p_tstat_distr
 ```
 
-# --- 6) Panel F: GO topic AUCell x scDRS correlation [[YUNDAN]]
+# --- 6) Panel F: Cortical enrichment patterns of GO topics [[PYTHON NOTEBOOK]] ---
 
-**TODO: Replace with spatial enrichment plot**
-
-```{r plot_topic_scDRS_enrich}
-df_scdrs_aucell_cor <- read_csv(file.path(tables_dir, "scDRS_topic_AUCell_cor_overall_celltype.csv"))
-
-ggplot() +
-  geom_tile(data = expand.grid(lineage_label = ct_order, gene_set = gs_order, stringsAsFactors = FALSE),
-            aes(x = lineage_label, y = gene_set),
-            fill = "white", color = "grey85", linewidth = 0.2) +
-  geom_tile(data = cor_overall_ct %>% filter(n_cells > 150),
-            aes(x = lineage_label, y = gene_set, fill = r_disease),
-            color = "grey85", linewidth = 0.2) +
-  geom_text(data = cor_overall_ct %>% filter(sig_label != ""),
-            aes(x = lineage_label, y = gene_set, label = sig_label),
-            size = 2, color = "white", vjust = 0.8) +
-  geom_vline(xintercept = separator_xpos, color = "grey40", linewidth = 0.4) +
-  scale_x_discrete(limits = ct_order) +
-  scale_y_discrete(limits = rev(gs_order)) +
-  scale_fill_gradientn(colors = c("white", "#fcbba1", "#b2182b", "#67000d"), name = "Spearman r") +
-  theme_classic(base_size = 6) +
-  theme(
-    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 6),
-    axis.text.y = element_text(size = 6),
-    axis.title = element_blank(),
-    legend.key.size = unit(0.3, "cm"),
-    legend.text = element_text(size = 6)
-  ) +
-  labs(title = "Overall: cell type x gene set")
-```
 
 # --- 7) Panel G: GR subclusters ---
 
@@ -647,10 +671,10 @@ node_stats <- df_gene_assignments %>%
     mutate(log_bf = log10(BF)) %>%
     dplyr::select(gene_name, GO_topic, log_bf)
 
-# Bold/outline genes: hubs + TFs of ASD modules
+# Bold/outline genes: top hub (rank 1 by kME) + TFs of ASD modules
 hubs <- df_module_kme %>%
     filter(module == kME_module & module %in% df_stepwise_res$module) %>%
-    group_by(module) %>% slice_max(kME, n = 10) %>% pull(gene_name)
+    group_by(module) %>% slice_max(kME, n = 1, with_ties = FALSE) %>% pull(gene_name)
 tfs <- df_stepwise_res %>%
     filter(study %in% c("Wamsley", "Wang")) %>%
     mutate(module_label = str_remove(module_label, "\\ .*")) %>% pull(module_label)
@@ -744,7 +768,7 @@ p_gr_subcluster
 # --- 8) Combined figure ---
 
 ```{r combined_figure, fig.width = 7.09, fig.height = 9.72}
-row_top <- p_mods_sig + p_beta + p_gamma + p_cell_type +
+row_top <- p_mods_sig + p_beta + p_module_topic + p_cell_type +
     plot_layout(widths = c(4.5, 0.75, 1, 4.75), nrow = 1)
 
 row_mid <- p_brainspan_traj + free(p_tstat_distr) + plot_spacer() +
@@ -753,7 +777,7 @@ row_mid <- p_brainspan_traj + free(p_tstat_distr) + plot_spacer() +
 row_bottom <- wrap_elements(p_gr_subcluster)
 
 fig2_combined <- (row_top / row_mid / row_bottom) +
-    plot_layout(heights = c(1.3, 0.5, 1.8)) +
+    plot_layout(heights = c(1.65, 0.65, 1.8)) +
     plot_annotation(tag_levels = "A") &
     theme(plot.tag = element_text(face = "bold", size = 10))
 

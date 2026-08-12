@@ -1,0 +1,280 @@
+---
+title: "Module synapse and HotNet enrichment"
+description: "Fisher's exact overlap of each significant module with SynGO synaptic genes overall, then with individual SynGO HotNet neighborhoods"
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set output directory for this notebook
+notebook_out_dir <- file.path(analysis_dir, "05_MORPH_annotation")
+```
+
+```{r env}
+# ASD-associated modules
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results
+
+# Genes in each module
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+
+# Module-topic assignments (restart stability of the topic model)
+topic_stability <- readRDS(
+    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+)
+df_top_topic <- topic_stability$consensus %>% 
+    dplyr::select(module, topic_label = consensus_topic)
+
+# SynGO HotNet gene sets (from 03_01)
+hotnet_gene_lists <- readRDS(file.path(analysis_dir, "04_SynGO", "04_02_hotnet-gene-lists.RDS"))
+
+# SynGO ontology background
+syngo_dir <- file.path(data_dir, "SynGO")
+df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
+
+# Brain-expressed gene list (Human Protein Atlas, non-HBA definition)
+# Synaptic enrichment test background
+df_brain <- read_tsv(
+    "https://www.proteinatlas.org/search/NOT+tissue_category_rna%3Abrain%3Bnot+detected?format=tsv&download=yes",
+    show_col_types = FALSE
+) %>%
+    clean_names()
+```
+
+
+# --- 1) Overall synapse enrichment --- #
+
+Before asking which synaptic neighborhood a module maps onto (section 2), test whether
+each module is enriched for synaptic genes at all (Fisher's exact test, two-sided).
+
+SynGO splits into two branches, so all three definitions are tested and reported: the
+**CC root** (synapse, GO:0045202, 1,487 genes) captures genes physically localized to the
+synapse; the **BP root** (process in the synapse, SYNGO:synprocess, 1,126 genes) captures
+genes participating in a synaptic process; and their union is every gene SynGO curates
+(1,602). All three share one background so only the foreground differs.
+
+In practice the branches are close to nested: 1,011 of the 1,126 BP genes are also
+annotated to CC, leaving only 115 BP-only genes. SynGO curates genes *at* the synapse and
+its BP terms describe what those genes do there, so "location" and "process" do not
+separate cleanly within this resource. Consistent with that, all three definitions flag
+the same 21 modules, and topic-level odds ratios differ only slightly (GR 1.34 / 1.37 /
+1.40, MORPH 2.65 / 2.42 / 2.71, SYN 3.93 / 4.03 / 3.82 for CC / BP / union). The CC root
+is used for the main figure as the most direct test of synaptic localization; the other
+two are retained as a sensitivity analysis.
+
+Both sections use two-sided tests so that odds ratios come with finite confidence
+intervals; a one-sided test returns an infinite upper bound by construction.
+
+Background: the module side is that study's network genes, and the gene-set side is the
+HPA brain-expressed list used in 03_00; `ORA_fisher()` intersects the two, so each module
+is compared against other brain-expressed genes *in its own network* and never against
+the genome. Restricting to brain-expressed genes is what guards against the standard
+confound that synaptic genes are brain-expressed, and it keeps the baseline synaptic rate
+comparable across studies, which matters because networks differ several-fold in how many
+non-brain and unannotated genes they carry.
+
+Substituting an all-GO-annotated background changes no conclusion: the same 21 modules
+reach BH < 0.05 with fold enrichment > 1 under either definition, and under all
+GO-annotated genes every odds ratio is slightly larger (SYN median 4.20 vs 3.82, GR 1.52
+vs 1.40) because a genome-wide background dilutes the synaptic baseline. The
+brain-expressed background is the more conservative of the two.
+
+Note this is not independent of the GO topic assignments — the SYN topic was itself
+derived from GO enrichment of these same modules. SynGO is expert-curated where the
+topic model is text-derived, so this is corroboration by an independent resource rather
+than independent evidence.
+
+## 1.1 Run ORA: modules × SynGO synaptic genes
+
+```{r syngo_module_ora}
+# Helper: genes annotated to one SynGO term (semicolon-free, comma-delimited symbols)
+get_syngo_term_genes <- function(term_id) {
+    df_syngo_ontol %>%
+        filter(id == term_id) %>%
+        pull(hgnc_symbol) %>%
+        str_split(", ") %>%
+        unlist() %>%
+        str_trim() %>%
+        unique()
+}
+
+# All SynGO-annotated genes (CC or BP). Also the background for the HotNet tests in
+# section 2, two of which are BP-derived and so need BP genes in their universe
+syngo_gene_set <- df_syngo_ontol %>%
+    dplyr::select(hgnc_symbol) %>%
+    separate_rows(hgnc_symbol, sep = ", ") %>%
+    mutate(hgnc_symbol = str_trim(hgnc_symbol)) %>%
+    pull(hgnc_symbol) %>%
+    unique()
+
+# Three definitions of "synaptic", tested separately. The CC root asks about physical
+# location at the synapse; the BP root asks about participation in a synaptic process;
+# the union is every gene SynGO curates. The two branches overlap heavily but are not
+# nested, so which one is used is a substantive choice rather than a technicality
+synaptic_gene_sets <- list(
+    "Synapse (CC)"          = get_syngo_term_genes("GO:0045202"),
+    "Synaptic process (BP)" = get_syngo_term_genes("SYNGO:synprocess"),
+    "All SynGO"             = syngo_gene_set
+)
+
+cat("gene set sizes:\n")
+walk2(names(synaptic_gene_sets), synaptic_gene_sets,
+      ~ cat(sprintf("  %-22s %d genes\n", .x, length(.y))))
+cat(sprintf("  CC and BP overlap: %d | CC only: %d | BP only: %d\n",
+            length(intersect(synaptic_gene_sets[[1]], synaptic_gene_sets[[2]])),
+            length(setdiff(synaptic_gene_sets[[1]], synaptic_gene_sets[[2]])),
+            length(setdiff(synaptic_gene_sets[[2]], synaptic_gene_sets[[1]]))))
+
+# Brain-expressed background, as HGNC symbols to match gene_name in the network data.
+# Every SynGO gene is force-included (as in 03_00) so that a synaptic gene missing from
+# the HPA list is not dropped, and so that all three tests share one identical universe
+brain_background <- union(df_brain$gene, syngo_gene_set)
+
+# Run ORA: each module against each of the three synaptic gene set definitions
+df_module_syngo_ora <- df_stepwise_res %>%
+    dplyr::select(study, module) %>%
+    left_join(df_top_topic) %>%
+    expand_grid(gene_set = names(synaptic_gene_sets)) %>%
+    mutate(
+        ora_res = pmap(
+            .l = list(..1 = study, ..2 = module, ..3 = gene_set),
+            .f = ~ {
+                df_study_tmp <- df_network_data %>%
+                    filter(study == ..1) %>%
+                    unnest(cols = c(data))
+
+                study_background <- df_study_tmp %>% pull(gene_name) %>% unique()
+                module_genes     <- df_study_tmp %>% filter(module == ..2) %>%
+                    pull(gene_name) %>% unique()
+
+                ORA_fisher(
+                    gene_list1       = module_genes,
+                    gene_list2       = synaptic_gene_sets[[..3]],
+                    background_list1 = study_background,
+                    background_list2 = brain_background,
+                    alternative      = "two.sided"
+                )
+            }
+        )
+    ) %>%
+    unnest(cols = c(ora_res)) %>%
+    # each gene set definition is its own family of tests across modules
+    group_by(gene_set) %>%
+    mutate(p_adj = p.adjust(p_value, method = "BH"), .before = n_overlap) %>%
+    ungroup() %>%
+    dplyr::rename(n_module = n_list1, n_gene_set = n_list2) %>%
+    mutate(
+        pct_module = n_overlap / n_module * 100,
+        gene_set   = factor(gene_set, levels = names(synaptic_gene_sets))
+    ) %>%
+    arrange(gene_set, p_value) %>%
+    left_join(df_stepwise_res %>% dplyr::select(module, module_label)) %>%
+    dplyr::select(study, module, module_label, topic_label, gene_set, everything())
+
+# Compare the three definitions: how many modules are enriched, and how strongly
+df_module_syngo_ora %>%
+    group_by(gene_set, topic_label) %>%
+    summarise(median_OR = round(median(odds_ratio), 2),
+              n_sig     = sum(p_adj < 0.05 & fold_enrichment > 1),
+              n         = n(), .groups = "drop") %>%
+    pivot_wider(names_from = topic_label, values_from = c(median_OR, n_sig, n)) %>%
+    print()
+```
+
+## 1.2 Save results
+
+```{r save_module_syngo_ora}
+saveRDS(df_module_syngo_ora,
+        file.path(notebook_out_dir, "05_00_module-SynGO-ORA.RDS")
+)
+```
+
+
+# --- 2) Module HotNet enrichment --- #
+
+Modules from the SYN topic are expected to be enriched for synaptic genes. Here we
+test, for each module × HotNet neighborhood combination, whether module genes are
+over-represented among HotNet genes (Fisher's exact test, two-sided). The background
+for each module is the set of genes in that study network.
+
+## 2.1 Run ORA: modules × HotNet neighborhoods
+
+```{r hotnet_module_ora}
+# Background for each module = all genes in that study's network
+# Foreground = module gene set
+# Gene set 2 = HotNet neighborhood genes (same across all studies)
+# BH correction applied within each HotNet neighborhood
+
+hotnet_names <- names(hotnet_gene_lists)
+
+df_module_hotnet_ora <- df_stepwise_res %>%
+    dplyr::select(study, module) %>%
+    left_join(df_top_topic) %>%
+    expand_grid(hotnet_group = hotnet_names) %>%
+    mutate(
+        ora_res = pmap(
+            .l = list(..1 = study, ..2 = module, ..3 = hotnet_group),
+            .f = ~ {
+                df_study_tmp <- df_network_data %>%
+                    filter(study == ..1) %>%
+                    unnest(cols = c(data))
+                
+                study_background <- df_study_tmp %>% pull(gene_name) %>% unique()
+                module_genes     <- df_study_tmp %>% filter(module == ..2) %>%
+                    pull(gene_name) %>% unique()
+                hotnet_gs        <- hotnet_gene_lists[[..3]]
+                
+                ORA_fisher(
+                    gene_list1       = module_genes,
+                    gene_list2       = hotnet_gs,
+                    background_list1 = study_background,
+                    background_list2 = syngo_gene_set,
+                    alternative      = "two.sided"
+                )
+            }
+        )
+    ) %>%
+    unnest(cols = c(ora_res)) %>%
+    group_by(hotnet_group) %>%
+    mutate(p_adj = p.adjust(p_value, method = "BH"), .before = n_overlap) %>%
+    ungroup() %>%
+    dplyr::rename(n_module = n_list1, n_hotnet = n_list2) %>%
+    mutate(pct_module = n_overlap / n_module * 100) %>%
+    arrange(hotnet_group, p_value) %>% 
+    left_join(df_stepwise_res %>% dplyr::select(module, module_label)) %>% 
+    dplyr::select(study, module, module_label, everything())
+
+print(df_module_hotnet_ora %>% filter(p_value < 0.05))
+```
+
+## 2.2 Save results
+
+```{r save_module_hotnet_ora}
+saveRDS(df_module_hotnet_ora, 
+        file.path(notebook_out_dir, "05_00_module-HotNet-ORA.RDS")
+)
+```
+
+
+# --- 3) Export results tables ---
+
+```{r export_tables}
+write_csv(
+    df_module_syngo_ora,
+    file = file.path(notebook_out_dir, "05_00_module-SynGO-ORA.csv")
+)
+write_csv(
+    df_module_hotnet_ora,
+    file = file.path(notebook_out_dir, "05_00_module-HotNet-ORA.csv")
+)
+```
+
+

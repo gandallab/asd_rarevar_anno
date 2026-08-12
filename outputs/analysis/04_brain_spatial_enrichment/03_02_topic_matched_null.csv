@@ -1,0 +1,4 @@
+gene_set,n,occipital_obs,unmatched_mean,p_unmatched,matched_mean,p_matched
+SYN,53,0.5092,0.05723,0.0002,0.35302,0.08538
+GR,120,0.54484,0.06057,0.0002,0.2972,0.0008
+MORPH,66,0.15327,0.05844,0.20036,0.27655,0.87522

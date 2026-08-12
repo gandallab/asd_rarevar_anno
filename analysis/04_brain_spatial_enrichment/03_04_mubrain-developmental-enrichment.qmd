@@ -1,0 +1,391 @@
+---
+title: "μBrain gene-set developmental enrichment"
+description: "Tests whether the ASD functional programs (GR/SYN/MORPH) are enriched across laminar zones and cortical regions of the prenatal cortex (μBrain, Ball et al. 2024), above a whole-transcriptome or an ASD-gene background, via linear mixed models."
+format: html
+---
+
+# --- 0) Setup --- #
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# libraries, directories, topic_colors (incl. lme4/lmerTest/emmeans/ggforce)
+project_dir <- "~/Documents/Postdoc/projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+results_dir  <- file.path(analysis_dir, "03_brain_spatial_enrichment")
+supp_fig_dir <- file.path(figures_dir, "supplement")
+```
+
+## 0.1 Load study data
+
+```{r load_data}
+# ASD rare variant data
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+asd_genes <- df_asd_rarevar_zscore %>% filter(FDR < 0.001 & !FLAG) %>% pull(gene_name)
+
+# Gene-topic assignments (GR / SYN / MORPH), from 02_02
+df_gene_assignments <- read_csv(
+    file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"),
+    show_col_types = FALSE)
+gene_lists <- df_gene_assignments %>%
+    split(.$GO_topic) %>%
+    map(~ pull(.x, gene_name) %>% unique())
+```
+
+
+## 0.2 Load and format μBrain data
+
+```{r load_mubrain}
+# μBrain laser-microdissection microarray of the prenatal human cortex
+# (Ball et al. 2024; Zenodo 10.5281/zenodo.10622336)
+# Long format: one row per gene x sample, annotated by tissue (laminar zone) and cortical_region.
+expression_url  <- "https://zenodo.org/records/10622337/files/uBrain-processed-lmd-data.csv?download=1"
+expression_data <- read_csv(expression_url, show_col_types = FALSE)
+
+# z-score each gene's expression across samples (fair comparison across genes
+# with different baseline expression)
+scaled_data <- expression_data %>%
+    group_by(gene) %>%
+    mutate(scaled_expr = scale(expression)[, 1]) %>%
+    ungroup()
+
+# mean scaled expression per topic x zone x region (feeds the fan geometry)
+module_spatial_profiles <- scaled_data %>%
+    inner_join(df_gene_assignments, by = join_by(gene == gene_name)) %>%
+    group_by(GO_topic, tissue, cortical_region) %>%
+    summarize(mean_scaled_expr = mean(scaled_expr, na.rm = TRUE),
+              n_genes_present  = n_distinct(gene),
+              .groups = "drop")
+```
+
+
+# --- 1) Gene-set enrichment above background (linear mixed models) --- #
+
+Each topic is tested against a **background** gene set:
+`member` = gene is in the topic (1) vs background (0), interacted with region / zone.
+
+Because expression is Z-scored per gene, the region/zone main effect absorbs the
+background's spatial pattern, so the `member` contrast (topic − background, via
+emmeans) is enrichment *above background*. 
+
+The region model is fit separately within each of the 5 zones, 
+and the laminar model pools the balanced regions with `(1 | cortical_region:tissue)`.
+
+## 1.1 Helper functions
+
+```{r enrich_helpers}
+topics <- c("GR", "SYN", "MORPH")
+
+# Keep topic + background genes, tag membership (topic vs background)
+add_member <- function(data, topic_genes, background_genes) {
+    data %>%
+        filter(gene %in% union(topic_genes, background_genes)) %>%
+        mutate(member = factor(if_else(gene %in% topic_genes, "topic", "background"),
+                               levels = c("background", "topic")))
+}
+
+# Per-region enrichment above background, fit SEPARATELY within each zone
+enrich_region_by_tissue <- function(topic, background_genes, data) {
+    add_member(data, gene_lists[[topic]], background_genes) %>%
+        nest(.by = tissue) %>%
+        mutate(res = map(data, function(d) {
+            
+            ## Main LME ##
+            m <- lmer(scaled_expr ~ member * cortical_region + (1 | gene), data = d)
+            
+            ## Extract per-topic contrasts ##
+            emmeans(m, ~ member | cortical_region, lmer.df = "asymptotic") %>%
+                contrast("revpairwise") %>%              # topic - background
+                summary(infer = TRUE, adjust = "BH") %>%
+                as_tibble() %>%
+                rename(statistic = any_of("t.ratio")) %>%
+                rename(statistic = any_of("z.ratio")) %>%
+                transmute(cortical_region, enrichment = estimate, statistic,
+                          FDR = p.value, significant = FDR < 0.05)
+        })) %>%
+        dplyr::select(tissue, res) %>%
+        unnest(res) %>%
+        mutate(topic = topic)
+}
+
+# Per-zone (laminar) enrichment above background, on the balanced regions
+enrich_layer <- function(topic, background_genes, data, regions) {
+    d <- add_member(data, gene_lists[[topic]], background_genes) %>%
+        filter(cortical_region %in% regions)
+    
+    ## Main LME ##
+    m <- lmer(scaled_expr ~ member * tissue + (1 | gene) + (1 | cortical_region:tissue), data = d)
+    ##
+    
+    ## Extract per-topic contrasts ##
+    emmeans(m, ~ member | tissue, lmer.df = "asymptotic") %>%
+        contrast("revpairwise") %>%
+        summary(infer = TRUE, adjust = "BH") %>%
+        as_tibble() %>%
+        rename(statistic = any_of("t.ratio")) %>%
+        rename(statistic = any_of("z.ratio")) %>%
+        transmute(tissue, enrichment = estimate, statistic,
+                  FDR = p.value, significant = FDR < 0.05, topic = topic)
+}
+```
+
+## 1.2 Whole-transcriptome background
+
+```{r enrich_transcriptome}
+# Background: the whole measured transcriptome in mubrain (n = ~10k genes)
+# The full ~10k-gene background makes these mixed models very large (10k gene
+# random effects x 5 zones x n_topics), so we draw a large random background --
+# the transcriptome mean is stable with a few thousand genes. Set n_background = Inf
+# to use every gene (slower).
+n_background <- Inf
+#set.seed(1)
+bg_transcriptome <- {
+    g <- setdiff(unique(scaled_data$gene), unlist(gene_lists))
+    if (is.finite(n_background)) sample(g, min(n_background, length(g))) else g
+}
+
+# --- Regions --- #
+df_region_enrich_bg <- map_dfr(topics, ~ enrich_region_by_tissue(.x, bg_transcriptome, scaled_data))
+
+# --- Layers --- #
+
+# laminar zones, deep (ventricular) to superficial (cortical plate)
+zone_levels <- c("ventricular", "subventricular", "intermediate", "subplate", "cortical_plate")
+
+# Regions sampled in every zone (drops paleocortex, retrosplenial, and the
+# partially-sampled insula/temporal/limbic regions) so layers are comparable
+balanced_regions <- scaled_data %>%
+    inner_join(df_gene_assignments, by = join_by(gene == gene_name)) %>%
+    distinct(cortical_region, tissue) %>%
+    count(cortical_region) %>%
+    filter(n == length(zone_levels)) %>%
+    pull(cortical_region)
+
+# Run LME
+df_layer_enrich_bg <- map_dfr(topics, ~ enrich_layer(.x, bg_transcriptome, scaled_data, balanced_regions))
+
+df_layer_enrich_bg
+```
+
+## 1.3 ASD-gene background
+
+Same models, but the background is the set of ASD risk genes, so this asks whether
+each topic is enriched *relative to ASD genes generally* rather than the whole
+transcriptome.
+
+```{r enrich_asd}
+# Background (b): all ASD risk genes (TADA FDR < 0.001, unflagged).
+df_region_enrich_asd <- map_dfr(topics, ~ enrich_region_by_tissue(.x, asd_genes, scaled_data))
+df_layer_enrich_asd  <- map_dfr(topics, ~ enrich_layer(.x, asd_genes, scaled_data, balanced_regions))
+
+df_layer_enrich_asd
+```
+
+## 1.4 Export results as tables
+
+```{r export_results}
+write_xlsx(
+    list(
+        "A. transcriptome-wide bg" = df_region_enrich_bg,
+        "B. ASD gene bg" = df_region_enrich_asd
+    ),
+    path = file.path(results_dir, "03_04_mubrain-developmental-enrichment.xlsx"),
+)
+```
+
+
+
+# --- 2) Plots--- #
+
+The fan reproduces the wedge layout of Ball et al. 2024 (μBrain, Fig. 2e): each
+wedge is one laminar zone × cortical region, drawn as an annular sector. Radius =
+laminar depth (ventricular innermost → cortical plate outermost), angle = cortical
+region ordered anterior → posterior. Fill = per-region enrichment above background
+(§1); black outline = significantly enriched (FDR < 0.05).
+
+## 2.1 Define fan geometry
+
+```{r fan_geometry}
+# --- Axis ordering --------------------------------------------------------- #
+
+# Radius grows outward (zone_levels above, VZ innermost) so the plot mirrors cortical anatomy.
+zone_labels <- c("VZ", "SVZ", "IZ", "SP", "CP")
+
+# Anterior -> posterior ordering of the 27 μBrain cortical regions.
+# The atlas orders regions on a continuous geodesic A-P axis
+# (surface_data/parcellated-axis-data.csv), which is not released with the
+# resource; this vector is an anatomical approximation of that axis
+region_ap_order <- c(
+  "frontal_pole", "orbitofrontal", "rostral_cingulate", "subcallosal_cingulate",
+  "dorsolateral_pfc", "ventrolateral_pfc", "motor", "midcingulate",
+  "granular_insula", "dysgranular_insula",
+  "sensory", "dorsal_parietal", "ventral_parietal", "caudal_cingulate", "retrosplenial",
+  "auditory", "dorsolateral_temporal", "ventrolateral_temporal",
+  "entorhinal", "perirhinal", "parahippocampal", "hippocampus", "paleocortex",
+  "lateral_temporal-occipital", "medial_temporal-occipital", "extrastriate", "primary_visual"
+)
+
+
+# --- Wedge geometry -------------------------------------------------------- #
+
+# Fan spans a 220-degree arc across the top, anterior region on the left,
+# matching the start/end angles used in the published figure.
+arc_span_deg  <- 220
+arc_start_deg <- -110          # left (anterior) end, measured clockwise from 12 o'clock
+region_gap    <- 0.12          # angular gap between neighbouring region wedges
+zone_gap      <- 0.10          # radial gap between zone rings
+
+fan_geom <- module_spatial_profiles %>%
+  filter(tissue %in% zone_levels, cortical_region %in% region_ap_order) %>%
+  mutate(
+    zone_i   = match(tissue, zone_levels),            # 1 = inner (VZ) .. 5 = outer (CP)
+    region_i = match(cortical_region, region_ap_order)
+  )
+
+n_region <- length(region_ap_order)
+step_deg <- arc_span_deg / n_region
+
+fan_geom <- fan_geom %>%
+  mutate(
+    start = (arc_start_deg + (region_i - 1) * step_deg) * pi / 180,
+    end   = (arc_start_deg + (region_i - 1) * step_deg + step_deg * (1 - region_gap)) * pi / 180,
+    r0    = zone_i,
+    r     = zone_i + 1 - zone_gap
+  )
+
+# Symmetric, robust colour limits centred on 0 (values are z-scores)
+fan_lim <- quantile(abs(fan_geom$mean_scaled_expr), 0.98, na.rm = TRUE)
+
+
+# --- Ring / spoke labels --------------------------------------------------- #
+
+# ggforce measures angles clockwise from 12 o'clock: x = r*sin(theta), y = r*cos(theta)
+
+# Zone labels (VZ..CP) along the anterior (left) edge of the fan, one per ring,
+# rotated to follow the radius (inner VZ -> outer CP)
+zone_ang_deg <- arc_start_deg - 0.5 * step_deg      # just left of the first region wedge
+zone_lab_df <- tibble(
+  label  = zone_labels,
+  radius = seq_along(zone_labels) + 0.4
+) %>%
+  mutate(
+    x     = radius * sin(zone_ang_deg * pi / 180),
+    y     = radius * cos(zone_ang_deg * pi / 180),
+    angle = 90 - zone_ang_deg,
+    angle = ifelse(angle > 90 & angle < 270, angle - 180, angle)  # keep upright
+  )
+
+# Region labels around the outer edge, one per region, rotated radially
+region_lab_df <- tibble(
+  cortical_region = region_ap_order,
+  mid_deg = arc_start_deg + (seq_len(n_region) - 1) * step_deg + step_deg * (1 - region_gap) / 2
+) %>%
+  mutate(
+    x     = 6.4 * sin(mid_deg * pi / 180),
+    y     = 6.4 * cos(mid_deg * pi / 180),
+    angle = 90 - mid_deg,
+    hjust = ifelse(angle > 90 & angle < 270, 1, 0),
+    angle = ifelse(angle > 90 & angle < 270, angle - 180, angle) # keep text upright
+  ) %>%
+    mutate(label = case_when(
+        cortical_region == "frontal_pole" ~ "anterior",
+        cortical_region == "primary_visual" ~ "posterior",
+        TRUE ~ NA_character_
+    ))
+
+# --- (tissue, region) -> wedge geometry lookup used by the plot helper ------ #
+fan_grid <- expand_grid(tissue = zone_levels, cortical_region = region_ap_order) %>%
+    mutate(zone_i   = match(tissue, zone_levels),
+           region_i = match(cortical_region, region_ap_order),
+           start = (arc_start_deg + (region_i - 1) * step_deg) * pi / 180,
+           end   = (arc_start_deg + (region_i - 1) * step_deg + step_deg * (1 - region_gap)) * pi / 180,
+           r0    = zone_i,
+           r     = zone_i + 1 - zone_gap)
+```
+
+## 2.2 Plot helper
+
+```{r fan_helper}
+# One fan for a single topic: fill = enrichment above background (white anchored
+# at 0), black outline = significantly enriched (FDR < 0.05 & statistic > 0).
+f_plot_fan_enrich <- function(df, topic_sel, topic_colors) {
+    dat <- df %>%
+        filter(topic == topic_sel) %>%
+        inner_join(fan_grid, by = c("tissue", "cortical_region"))
+
+    # robust upper limit; white anchored at 0 (= background level). Use
+    # limits = range(dat$enrichment) instead if you also want to show depletion.
+    lim <- quantile(dat$enrichment, 0.98, na.rm = TRUE)
+
+    ggplot(dat) +
+        geom_arc_bar(aes(x0 = 0, y0 = 0, r0 = r0, r = r, start = start, end = end,
+                         fill = enrichment, color = FDR < 0.05 & statistic > 0),
+                     linewidth = 0.20) +
+        geom_text(data = region_lab_df %>% mutate(cortical_region = str_replace_all(cortical_region, "_", " ")),
+                  aes(x = x, y = y, label = cortical_region, hjust = hjust, angle = angle),
+                  size = 1.8, color = "grey20") +
+        geom_text(data = zone_lab_df, aes(x = x, y = y, label = label, angle = angle),
+                  size = 2, fontface = "bold") +
+        scale_fill_gradient2(
+            low = "gray40", mid = "white", high = topic_colors[[topic_sel]],
+            limits = c(-lim, lim), oob = scales::squish, na.value = "grey85",
+            name = paste0(topic_sel, " enrichment\n(vs background)")) +
+        scale_color_manual(values = c("TRUE" = "black", "FALSE" = "gray80"),
+                           name = "sig. enriched above bg\n(FDR < 0.05)") +
+        coord_fixed(xlim = c(-6.8, 6.8), ylim = c(-3, 6.7), clip = "off") +
+        theme_void() +
+        labs(title = topic_sel) +
+        theme(
+            plot.title = element_text(size = 6.5, face = "bold", margin = margin(b = -5)),
+            legend.position       = "bottom",
+            legend.title.position = "top",
+            legend.title = element_text(size = 5, hjust = 0.5),
+            legend.text  = element_text(size = 4),
+            legend.key.height = unit(0.15, "cm"),
+            legend.key.width  = unit(0.35, "cm"),
+            legend.margin = margin(t = -50),
+            plot.margin = margin(0, 0, 0, 0)
+        )
+}
+```
+
+## 2.3 Whole-transcriptome-background fans
+
+```{r fan_plot_bg, fig.width = 6, fig.height = 8}
+# Fill = per-region x per-zone enrichment above the transcriptome background
+# (effect size = emmeans estimate, z units) from df_region_enrich_bg; one fan per
+# topic, sequential white -> topic colour.
+p_supp_fan_bg <- map(names(topic_colors),
+                     ~ f_plot_fan_enrich(df_region_enrich_bg, .x, topic_colors)) %>%
+    wrap_plots(ncol = 1)
+
+p_supp_fan_bg
+
+ggsave(
+    filename = file.path(supp_fig_dir, "03_04_mubrain-fan-transcriptome-bg.pdf"),
+    plot     = p_supp_fan_bg,
+    height   = 8,
+    width    = 6,
+    dpi      = 300
+)
+```
+
+## 2.4 ASD-gene-background fans
+
+```{r fan_plot_asd, fig.width = 6, fig.height = 8}
+# Same fans, enrichment relative to the ASD risk-gene background (df_region_enrich_asd).
+p_supp_fan_asd <- map(names(topic_colors),
+                     ~ f_plot_fan_enrich(df_region_enrich_asd, .x, topic_colors)) %>%
+    wrap_plots(ncol = 1)
+
+p_supp_fan_asd
+
+ggsave(
+    filename = file.path(supp_fig_dir, "03_04_mubrain-fan-ASD-bg.pdf"),
+    plot     = p_supp_fan_asd,
+    height   = 8,
+    width    = 6,
+    dpi      = 300
+)
+```

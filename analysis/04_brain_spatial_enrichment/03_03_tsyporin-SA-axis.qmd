@@ -1,0 +1,240 @@
+---
+title: "ASD modules vs. the Tsyporin sensorimotor–association (S–A) areal-identity gene lists"
+description: "Hypergeometric enrichment of each significant ASD module's full membership for the sensorimotor (S) and association (A) gene modules of Tsyporin et al., tested against that module's own study network as the universe."
+format: html
+---
+
+The topography analyses (notebooks 03_01–03_02) test the ASD *risk-gene* topic sets, which are
+small (43–171 genes on the Tsyporin side) and, for MORPH, made up of upstream regulators
+that are largely absent from Tsyporin's Table S5 membership lists. Here we instead test the
+full co-expression / regulatory **module membership** of the significant ASD modules —
+median ~650 members — against the S and A lists. That is better powered, non-circular, and
+the natural quantitative counterpart to the regulator-level convergence: it asks whether
+the ASD programs are wired into the areal-identity machinery, rather than whether they sit
+in the same place on the cortex.
+
+Each module is tested against **its own study's network as the universe**, because a gene
+can only join a module if it was measured in that study.
+
+# --- 0) Setup --- #
+
+```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse); library(readxl); library(janitor); library(ggtext); library(patchwork)
+
+project_dir  <- path.expand("~/Documents/Postdoc/projects/ASD-rarevar-annot")
+source(file.path(project_dir, "code/setup.R"))          # topic_colors, theme, dirs
+
+analysis_dir <- file.path(project_dir, "outputs/analysis")
+results_dir  <- file.path(analysis_dir, "03_brain_spatial_enrichment")
+supp_fig_dir <- file.path(figures_dir, "supplement")
+```
+
+## 0.1 Load data
+
+```{r load_data, message=FALSE, warning=FALSE}
+# Tsyporin shared gene modules (Supplementary Table 5): S = sensorimotor GM (43 genes),
+# "Af u At" = association GM, fetal union adult (171 genes)
+tsy <- read_xlsx(file.path(project_dir, "data/Tsyporin2026/Supplementary_Table_5_GMs_shared.xlsx"))
+SA <- list(S = tsy$GeneSymbol[tsy$Type == "S"],
+           A = tsy$GeneSymbol[tsy$Type == "Af u At"])
+
+# gene -> module assignments across all networks, and the significant modules from the
+# stepwise conditional analysis with their consensus GO topic
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format/00_00_gene-networks-all.RDS"))
+df_top_topic <- readRDS(
+    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+)$consensus %>%
+    dplyr::select(module, topic_label = consensus_topic)
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification",
+              "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results
+
+df_network_data_unnested <- df_network_data %>% unnest(data)
+study_genes <- df_network_data_unnested %>%
+    group_by(study) %>%
+    summarise(uni = list(unique(gene_name)), .groups = "drop") %>%
+    deframe()
+module_genes <- df_network_data_unnested %>%              # module_label = readable hub/TF name
+    group_by(study, module, module_label) %>%
+    summarise(genes = list(unique(gene_name)), .groups = "drop")
+
+df_sig_mods <- df_stepwise_res %>%
+    dplyr::select(module, hub_is_risk_gene) %>%
+    left_join(df_top_topic, by = "module") %>%
+    inner_join(module_genes, by = "module")
+
+cat(sprintf("significant modules: %d | S list: %d genes | A list: %d genes\n",
+            nrow(df_sig_mods), length(SA$S), length(SA$A)))
+```
+
+# --- 1) Module enrichment for the S/A areal-identity gene lists --- #
+
+One-sided Fisher exact test per module x list. The universe is the module's own study
+network, so modules from differently-sized networks are not compared on an unequal
+footing. BH-FDR is applied across the significant modules **separately within each list**,
+since S and A are two distinct hypotheses rather than one family.
+
+```{r module_SA_hyper}
+hyper_mod <- function(genes, study, L) {
+    U  <- study_genes[[study]]
+    M  <- intersect(genes, U)
+    B  <- intersect(SA[[L]], U)
+    ov <- length(intersect(M, B))
+    ft <- fisher.test(matrix(c(ov, length(M) - ov, length(B) - ov,
+                               length(U) - length(M) - length(B) + ov), 2),
+                      alternative = "greater")
+    tibble(list = L, overlap = ov, expected = round(length(M) * length(B) / length(U), 1),
+           OR = unname(ft$estimate), p = ft$p.value)
+}
+
+hyper_mod_res <- df_sig_mods %>%
+    mutate(n_genes = lengths(genes),                      # module size, for point sizing
+           h = map2(genes, study, ~ bind_rows(hyper_mod(.x, .y, "S"),
+                                              hyper_mod(.x, .y, "A")))) %>%
+    dplyr::select(module, module_label, topic_label, study, hub_is_risk_gene, n_genes, h) %>%
+    unnest(h) %>%
+    group_by(list) %>% mutate(fdr = p.adjust(p, "BH")) %>% ungroup()
+
+write_csv(hyper_mod_res %>% dplyr::select(-any_of("genes")),
+          file.path(results_dir, "03_03_module-SA-enrichment.csv"))
+hyper_mod_res
+```
+
+# --- 2) Plots --- #
+
+## 2.1 Per-module odds ratios
+
+```{r module_SA_bar, fig.width=7.1, fig.height=5.5}
+# Horizontal bars: log10(odds ratio) per module, faceted by S/A list and ordered by OR
+# within each facet. Fill = GO topic; stars = BH-FDR; dashed line = OR 1 (no enrichment).
+# Module labels are bolded where the module hub is itself an ASD risk gene.
+bar_df <- hyper_mod_res %>%
+    mutate(list = factor(list, c("S", "A"), c("sensorimotor (S)", "association (A)")),
+           key = paste(module_label, list, sep = "___"),
+           label = case_when(fdr < 0.001 ~ "***",
+                             fdr < 0.01  ~ "**",
+                             fdr < 0.05  ~ "*",
+                             TRUE        ~ "")) %>%
+    arrange(list, OR) %>%
+    mutate(key = ifelse(hub_is_risk_gene, paste0("<b>", key, "</b>"), key),
+           key = factor(key, levels = unique(key)))
+
+p_sa <- ggplot(bar_df, aes(log10(OR), key, fill = topic_label)) +
+    geom_col(width = 0.75) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.3) +
+    geom_text(aes(label = label), hjust = -0.2, vjust = 0.78, size = 3, color = "black") +
+    facet_wrap(~ list, scales = "free_y") +
+    scale_y_discrete(labels = function(x) sub("___.*", "", x)) +
+    scale_fill_manual(values = topic_colors, name = NULL) +
+    labs(x = "log10(odds ratio)", y = NULL,
+         title = "ASD module enrichment for S/A areal identity genes") +
+    theme_bw() +
+    theme(plot.title = element_text(size = 7, hjust = 0.5, face = "bold"),
+          axis.text.y = ggtext::element_markdown(size = 6, color = "black"),
+          axis.text.x = element_text(size = 6), axis.title.x = element_text(size = 6.5),
+          strip.text = element_text(size = 7, face = "bold"),
+          strip.background = element_blank(),
+          legend.position = "top", legend.text = element_text(size = 6))
+p_sa
+```
+
+## 2.2 Enrichment by GO topic
+
+```{r module_SA_box, fig.width=7.1, fig.height=2.6}
+# Distribution of module log10(OR) by topic, within each list. Brackets are pairwise
+# two-sided Wilcoxon rank-sum tests between topics, uncorrected (three comparisons per
+# list, exploratory), stacked narrowest-span-first so they never overlap.
+box_df <- hyper_mod_res %>%
+    mutate(logOR = log10(pmax(OR, 1e-1)),
+           list  = factor(list, c("S", "A"), c("sensorimotor (S)", "association (A)")))
+
+topics    <- if (is.factor(box_df$topic_label)) levels(droplevels(box_df$topic_label))
+             else sort(unique(box_df$topic_label))
+topic_pos <- setNames(seq_along(topics), topics)
+star <- function(p) as.character(cut(p, c(-Inf, 1e-3, 1e-2, 5e-2, Inf), c("***", "**", "*", "ns")))
+rng  <- diff(range(box_df$logOR)); step <- 0.06 * rng; tick <- 0.02 * rng
+
+sig_df <- map_dfr(levels(box_df$list), function(L) {
+    d <- filter(box_df, list == L); y0 <- max(d$logOR)
+    combos <- asplit(combn(topics, 2), 2)
+    combos <- combos[order(map_dbl(combos, ~ abs(diff(topic_pos[.x]))))]
+    imap_dfr(combos, function(pr, i) {
+        w <- suppressWarnings(
+            wilcox.test(logOR ~ topic_label, data = droplevels(filter(d, topic_label %in% pr))))
+        tibble(list = L, x1 = topic_pos[[pr[1]]], x2 = topic_pos[[pr[2]]],
+               y = y0 + step * i, p = w$p.value, lab = star(w$p.value))
+    })
+}) %>% mutate(list = factor(list, levels = levels(box_df$list)))
+
+p_box <- ggplot(box_df, aes(topic_label, logOR, color = topic_label)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey60") +
+    geom_boxplot(outlier.shape = NA, width = 0.55, fill = NA) +
+    geom_jitter(width = 0.15, height = 0, size = 1.3, alpha = 0.85) +
+    geom_segment(data = sig_df, aes(x = x1, xend = x2, y = y, yend = y),
+                 inherit.aes = FALSE, linewidth = 0.3) +
+    geom_segment(data = sig_df, aes(x = x1, xend = x1, y = y, yend = y - tick),
+                 inherit.aes = FALSE, linewidth = 0.3) +
+    geom_segment(data = sig_df, aes(x = x2, xend = x2, y = y, yend = y - tick),
+                 inherit.aes = FALSE, linewidth = 0.3) +
+    geom_text(data = sig_df, aes(x = (x1 + x2) / 2, y = y + 1.2 * tick, label = lab),
+              inherit.aes = FALSE, size = 2.4, color = "black") +
+    facet_wrap(~ list) +
+    coord_flip() +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.04))) +
+    scale_color_manual(values = topic_colors, guide = "none") +
+    labs(x = NULL, y = expression("module enrichment " * log[10] * "(OR)"), title = NULL) +
+    theme(panel.spacing = unit(1.5, "cm"),
+          strip.text = element_blank(), strip.background = element_blank())
+p_box
+```
+
+## 2.3 Supplementary figure
+
+```{r module_SA_combined, fig.width=7.1, fig.height=7}
+p_sa_combined <- p_sa / p_box +
+    plot_layout(heights = c(3, 1)) +
+    plot_annotation(tag_levels = "A") &
+    theme(plot.tag = element_text(face = "bold", size = 10))
+p_sa_combined
+
+ggsave(file.path(supp_fig_dir, "03_03_Tsyporin-SA-overlap.pdf"),
+       plot = p_sa_combined, width = 7.1, height = 7, dpi = 300)
+```
+
+# --- 3) Summary --- #
+
+```{r module_SA_summary}
+hyper_mod_res %>%
+    group_by(list, topic_label) %>%
+    summarise(n_mod = n(), n_fdr05 = sum(fdr < 0.05),
+              median_OR = round(median(OR), 2), .groups = "drop")
+
+# Is MORPH disproportionately enriched relative to the other topics? One-sided Wilcoxon.
+for (L in c("S", "A")) {
+    d <- hyper_mod_res %>% filter(list == L) %>% mutate(l2 = log2(pmax(OR, 1e-3)))
+    w <- suppressWarnings(
+        wilcox.test(l2 ~ (topic_label == "MORPH"), data = d, alternative = "less"))
+    cat(sprintf("%s list: MORPH median log2OR = %.2f vs rest %.2f  (Wilcoxon p = %.3f)\n",
+                L, median(d$l2[d$topic_label == "MORPH"]),
+                median(d$l2[d$topic_label != "MORPH"]), w$p.value))
+}
+
+# Do MORPH modules favour one pole over the other?
+wilcox.test(log10(OR) ~ list, data = hyper_mod_res %>% filter(topic_label == "MORPH"))
+```
+
+# --- Interpretation --- #
+
+**MORPH modules are disproportionately enriched for the association (A) identity genes**
+(median OR ≈ 2.6 vs ≤ 1.6 for GR/SYN; MORPH-vs-rest Wilcoxon P = 0.002), with the top hits
+being the MORPH TF-regulons themselves (TCF4, LHX9, SOX11, ZBTB18, THRB). For the
+sensorimotor (S) list MORPH is enriched in absolute terms (median OR ≈ 3.1, 4/12 modules
+FDR-significant) but not *disproportionately* — SYN modules are comparably enriched
+(P = 0.19). Individual MORPH modules tend to be pole-specific (4 S-only, 3 A-only, none
+both), so MORPH spans the axis collectively while single regulons specialise; only SYN has
+modules significant for both poles (2/5).
+
+The ASD morphogenesis programs are therefore wired into the association-identity machinery
+Tsyporin's transcription factors control — a convergence at the level of module membership
+that the cortical topography tests in notebooks 03_01–03_02 are not designed to detect.

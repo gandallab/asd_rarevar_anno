@@ -1,0 +1,669 @@
+---
+title: "GO similarity and enrichments for regulons with ASD gene TF"
+description: "Explore the architecture and synaptic enrichments of the MEF2C (+), FOXP2 (+), ZBTB18 (+), SOX11 (+), TCF4 (+) regulons"
+date: 2026-08-04
+format: html
+---
+
+
+# --- 0) Setup --- #
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set directory for analysis outputs
+notebook_out_dir <- file.path(analysis_dir, "05_MORPH_annotation")
+```
+
+Load data
+
+```{r load_study_data}
+# ASD rare variant statistics
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# Gene --> module/transcript assignments across studies (for the regulon gene sets)
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+
+# Module association results (defines which regulons have an ASD risk gene as their TF)
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results
+
+# Module membership (kME), used when building PPI node tables
+df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
+
+# Gene-topic assignments (from notebook 02_02)
+df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+
+# SynGO ontology
+syngo_dir <- file.path(data_dir, "SynGO")
+df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
+
+# GO ID to gene mapping
+go_mapping <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = keys(org.Hs.eg.db, keytype = "ENSEMBL"),
+  columns = c("GO", "ONTOLOGY"),
+  keytype = "ENSEMBL"
+) %>%
+    as_tibble() %>%
+    clean_names %>%
+    dplyr::rename(go_id = go, ensembl_gene_id = ensembl) %>%
+    dplyr::select(-evidence) #%>%
+
+    # # filter pathways by size
+    # filter(ontology == "BP") %>%
+    # group_by(go_id) %>%
+    # mutate(n_genes = n_distinct(ensembl_gene_id)) %>%
+    # ungroup() %>%
+    # filter(n_genes > 5 & n_genes < 1000)
+```
+
+Define regulons of interest: those that have an ASD gene as the TF
+
+```{r define_regulons}
+asd_tf_regulons <- df_stepwise_res %>%
+    filter(hub_is_risk_gene & study %in% c("Wang", "Wamsley")) %>%
+    pull(module)
+
+# Study each regulon came from; the ORA background has to be that study's own network
+regulon_study <- df_stepwise_res %>%
+    filter(module %in% asd_tf_regulons) %>%
+    dplyr::select(module, study) %>%
+    deframe()
+
+# Regulon TF symbol, taken from the module name (e.g. MEF2C_+_+ -> MEF2C)
+regulon_tf <- set_names(str_remove(asd_tf_regulons, "_.*"), asd_tf_regulons)
+
+# Regulon members, keyed by module so every downstream result stays labeled
+df_regulon_members <- df_network_data %>%
+    unnest(cols = c(data)) %>%
+    filter(module %in% asd_tf_regulons) %>%
+    distinct(module, ensembl_gene_id, gene_name)
+
+regulon_gene_names <- df_regulon_members %>%
+    group_by(module) %>% summarise(g = list(unique(gene_name)), .groups = "drop") %>% deframe()
+
+regulon_gene_ids <- df_regulon_members %>%
+    filter(!is.na(ensembl_gene_id)) %>%
+    group_by(module) %>% summarise(g = list(unique(ensembl_gene_id)), .groups = "drop") %>% deframe()
+
+cat("ASD-TF regulons:", paste(asd_tf_regulons, collapse = ", "), "\n")
+cat("regulon sizes:", paste(lengths(regulon_gene_names), collapse = ", "), "\n")
+```
+
+
+# --- 1) Calculate GO cosine similarity of the ASD gene TF regulons ---
+
+```{r GO_similarity}
+# One GO cosine-similarity network per regulon (BP ontology; identical build to GR/MORPH)
+asd_tf_regulon_nets <- map(
+    regulon_gene_names, 
+    ~ build_go_network(
+        .x,
+        go_mapping = go_mapping %>% filter(ontology == "BP"),
+        gene_stats = df_asd_rarevar_zscore
+    )
+)
+
+# Save the network objects for plotting in Fig4 (named list, one entry per regulon)
+saveRDS(asd_tf_regulon_nets,
+        file = file.path(notebook_out_dir, "05_02_ASD-TF-regulon-GO-similarity-graphs.RDS"))
+```
+
+
+# --- 2) Run SynGO enrichment on the ASD gene TF regulons ---
+
+```{r SynGO_ORA}
+# Study network backgrounds; each regulon is tested against the study it came from
+study_backgrounds <- df_network_data %>%
+    unnest(cols = c(data)) %>%
+    filter(study %in% regulon_study, !is.na(ensembl_gene_id)) %>%
+    distinct(study, ensembl_gene_id) %>%
+    group_by(study) %>%
+    summarise(g = list(unique(ensembl_gene_id)), .groups = "drop") %>%
+    deframe()
+
+# Convert SynGO tibble to a list of pathways. ensembl_id is a comma-space-delimited
+# string of gene IDs per term, so split it to one gene per row before grouping.
+syngo_genes_list <- df_syngo_ontol %>%
+    dplyr::select(id, ensembl_id) %>%
+    filter(!is.na(ensembl_id)) %>%
+    separate_rows(ensembl_id, sep = ", ") %>%
+    mutate(ensembl_id = str_trim(ensembl_id)) %>%
+    group_by(id) %>%
+    summarise(genes = list(unique(ensembl_id)), .groups = "drop") %>%
+    filter(lengths(genes) >= 5 & lengths(genes) <= 1000) %>% # drop very small / very broad terms (matches 02_00)
+    deframe()
+
+# SynGO background: every gene annotated to any SynGO term (the list2 universe)
+syngo_background <- df_syngo_ontol %>%
+    dplyr::select(ensembl_id) %>%
+    filter(!is.na(ensembl_id)) %>%
+    separate_rows(ensembl_id, sep = ", ") %>%
+    mutate(ensembl_id = str_trim(ensembl_id)) %>%
+    pull(ensembl_id) %>%
+    unique()
+
+# ORA: each regulon vs each SynGO term it overlaps by > 1 gene (same pre-filter as 02_00).
+# Fisher's exact, one-sided over-representation; universe = that regulon's study network
+# intersected with SynGO, matching the 02_00 call
+df_syngo_res <- imap_dfr(regulon_gene_ids, function(gene_ids, mod) {
+    syngo_tested <- syngo_genes_list[
+        map_lgl(syngo_genes_list, ~ length(intersect(.x, gene_ids)) > 1)
+    ]
+    imap_dfr(syngo_tested, ~
+        ORA_fisher(
+            gene_list1       = gene_ids,
+            gene_list2       = .x,
+            background_list1 = study_backgrounds[[ regulon_study[[mod]] ]],
+            background_list2 = syngo_background,
+            alternative      = "greater"
+        ) %>%
+            mutate(module = mod, go_id = .y)
+    )
+})
+
+# Format: attach term name/domain, add % of regulon overlapping. Each regulon is its own
+# family of tests, so BH is applied within module rather than across all regulons
+df_syngo_res <- df_syngo_res %>%
+    left_join(df_syngo_ontol %>% dplyr::select(go_id = id, term = name, domain),
+              by = "go_id") %>%
+    group_by(module) %>%
+    mutate(p_adj = p.adjust(p_value, method = "BH"), .before = n_overlap) %>%
+    ungroup() %>%
+    dplyr::rename(n_module = n_list1, n_pathway = n_list2) %>%
+    mutate(pct_module = n_overlap / n_module * 100) %>%
+    dplyr::select(module, go_id, term, domain, everything()) %>%
+    arrange(module, p_value)
+
+# Save the object for plotting in Fig4
+saveRDS(df_syngo_res, file = file.path(notebook_out_dir, "05_02_ASD-TF-regulon-SynGO-enrichment.RDS"))
+```
+
+
+# --- 3) ASD gene TF regulon PPI data ---
+
+## 5.1 STRINGdb setup
+
+```{r stringdb_setup}
+string_db <- STRINGdb$new(
+    version        = "12",
+    species        = 9606,
+    score_threshold = 400,
+    network_type   = "physical",
+    input_directory = ""
+)
+```
+
+## 3.2 Retrieve PPI data for the ASD gene TF regulons
+
+Helper function
+
+```{r get_ppi_data_function}
+get_module_ppi_data <- function(mod_name,
+                                string_db,
+                                df_network = df_network_data,
+                                df_kme     = df_module_kme,
+                                df_asd     = df_asd_rarevar_zscore) {
+
+    print(paste0("Getting PPI for ", mod_name))
+
+    # 1. Base gene list for the module
+    genes_in_mod <- df_network %>%
+        unnest(cols = c(data)) %>%
+        ungroup() %>%
+        filter(module == mod_name) %>%
+        filter(!is.na(ensembl_gene_id)) %>%
+        dplyr::select(ensembl_gene_id, gene_name) %>%
+        distinct()
+
+    # 2. Node preparation
+    coexp_modules <- df_kme %>% pull(module) %>% unique
+    if (mod_name %in% coexp_modules) {
+        nodes <- df_kme %>%
+            filter(module == mod_name & kME_module == mod_name) %>%
+            dplyr::select(ensembl_gene_id, gene_name, kME) %>%
+            distinct() %>%
+            arrange(-kME) %>%
+            mutate(rank = row_number()) %>%
+            left_join(df_asd %>% dplyr::select(ensembl_gene_id, FDR, contains("BF")),
+                      by = "ensembl_gene_id")
+    } else {
+        nodes <- genes_in_mod %>%
+            left_join(df_asd %>% dplyr::select(ensembl_gene_id, FDR, contains("BF")),
+                      by = "ensembl_gene_id") %>%
+            mutate(rank = 999, kME = NA)
+    }
+
+    # 3. Map to STRING
+    mapped <- string_db$map(as.data.frame(nodes), "ensembl_gene_id", removeUnmappedRows = TRUE)
+
+    # 4. Extract edges
+    edges_raw <- string_db$get_interactions(mapped$STRING_id)
+
+    # 5. Format edges
+    edges <- as_tibble(edges_raw) %>%
+        left_join(mapped %>% dplyr::rename_all(~paste0("from_", .x)),
+                  by = join_by(from == from_STRING_id)) %>%
+        left_join(mapped %>% dplyr::rename_all(~paste0("to_", .x)),
+                  by = join_by(to == to_STRING_id)) %>%
+        dplyr::select(contains("ensembl_gene_id"), combined_score) %>%
+        distinct() %>%
+        mutate(confidence = case_when(
+            combined_score >= 900 ~ "Very High (>0.9)",
+            combined_score >= 700 ~ "High (0.7-0.9)",
+            TRUE                  ~ "Medium (0.4-0.7)"
+        )) %>%
+        mutate(confidence = factor(confidence,
+                                   levels = c("Very High (>0.9)", "High (0.7-0.9)", "Medium (0.4-0.7)")))
+
+    return(list(nodes = nodes, edges = edges, module = mod_name))
+}
+```
+
+Run on the ASD gene TF regulons
+
+```{r run_ppi_data}
+ppi_data_results <- map(
+    set_names(asd_tf_regulons), 
+    ~ get_module_ppi_data(.x, string_db, df_network_data, df_module_kme, df_asd_rarevar_zscore)
+)
+
+# Save output as RDS file (named list, one entry per regulon)
+saveRDS(
+    ppi_data_results,
+    file = file.path(notebook_out_dir, "05_02_ASD-TF-regulons-PPI.RDS")
+)
+```
+
+
+# --- 4) Supplement plots --- #
+
+## 4.1 ASD gene TF regulons PPI plot
+
+Helper function
+
+```{r plot_ppi_function}
+plot_module_ppi <- function(ppi_list,
+                            min_confidence = 700,
+                            max_BF,
+                            genes_to_label = NULL,
+                            genes_to_bold = NULL,
+                            n_top_genes_to_label = 10,
+                            legend = FALSE,
+                            seed = 234) {
+
+    # 1. Create graph object
+    graph <- tbl_graph(
+        nodes    = ppi_list$nodes,
+        edges    = ppi_list$edges %>% filter(combined_score >= min_confidence),
+        node_key = "ensembl_gene_id",
+        directed = FALSE
+    ) %>%
+        activate(nodes) %>%
+        arrange(FDR) %>%
+        mutate(asd_rank = row_number()) %>%
+        # GO topic from the section-1 gene–topic assignment (NA for non-risk interactors)
+        mutate(GO_topic = df_gene_assignments$GO_topic[match(gene_name, df_gene_assignments$gene_name)]) %>%
+        # de-emphasize the non-topic (non-risk) interactors: fade and shrink them
+        mutate(node_alpha = if_else(is.na(GO_topic), 0.35, 1),
+               node_size  = if_else(is.na(GO_topic), 0,    log_BF)) %>%
+        mutate(label = case_when(
+            asd_rank <= n_top_genes_to_label ~ gene_name,
+            gene_name %in% genes_to_label    ~ gene_name,
+            TRUE                             ~ ""
+        )) %>%
+        arrange(log_BF) %>%
+        filter(!node_is_isolated() | label != "")
+
+    # 2. Keep only subclusters containing at least one ASD risk gene (FDR < 0.001)
+    graph_filtered <- graph %>%
+        mutate(comp_id = group_components()) %>%
+        group_by(comp_id) %>%
+        filter(any(FDR < 0.001)) %>%
+        ungroup()
+
+    # 3. Plot
+    set.seed(seed)
+    p <- ggraph(graph_filtered, layout = "fr") +
+        # all edges uniform (PPI confidence distinction is too subtle to be meaningful at this size)
+        geom_edge_link(edge_width = 0.2, color = "gray85", alpha = 0.5) +
+        # geom_edge_link(aes(edge_width = confidence, color = confidence), alpha = 0.5) +
+        geom_node_point(aes(fill   = GO_topic,
+                            size   = node_size,
+                            alpha  = node_alpha,
+                            stroke = !is.na(FDR) & FDR < 0.001
+                            ),
+                        color = "gray20",
+                        shape = 21) +
+        scale_alpha_identity() +
+        geom_node_text(aes(label    = label,
+                           fontface = if_else(label %in% genes_to_bold, "bold", "plain")),
+                       size = 1.6, vjust = -0.8) +
+
+        # scale_edge_width_manual(
+        #     values = c("Very High (>0.9)" = 0.4, "High (0.7-0.9)" = 0.2, "Medium (0.4-0.7)" = 0.08),
+        #     name   = "PPI Confidence"
+        # ) +
+        # scale_edge_color_manual(
+        #     values = c("Very High (>0.9)" = "gray78", "High (0.7-0.9)" = "gray85", "Medium (0.4-0.7)" = "gray92"),
+        #     name   = "PPI Confidence"
+        # ) +
+        scale_discrete_manual(aesthetics = "stroke",
+                              values = c("TRUE" = 0.5, "FALSE" = 0.25),
+                              name   = "TADA FDR < 0.001",
+                              guide = "none"
+                              ) +
+        # scale_color_manual(values = c("TRUE" = "gray20", "FALSE" = "gray20"),
+        #                    name   = "TADA FDR < 0.001"
+        #                    ) +
+        scale_fill_manual(values = c(topic_colors, "NA (TADA FDR > 0.001)" = "gray50"),
+                          name   = "GO topic") +
+        scale_size_continuous(range  = c(1, 4),
+                              limits = c(0, max_BF),
+                              name   = "log10(BF)") +
+        guides(
+            size          = guide_legend(nrow = 1),
+            fill          = guide_legend(nrow = 1)
+        ) +
+        coord_cartesian(clip = "off") +
+        theme_void() +
+        labs(title = NULL) +
+        theme(
+            plot.title            = element_blank(),
+            plot.margin           = margin(0, 0, 0, 0),
+            legend.position       = "bottom",
+            legend.box            = "vertical",
+            legend.title.position = "top",
+            legend.title          = element_text(hjust = 0.5, size = 6),
+            legend.text           = element_text(margin = margin(l = -1), size = 5.5),
+            legend.key.height     = unit(0.3, "cm"),
+            legend.spacing        = unit(0.15, "cm"),
+            legend.box.just       = "bottom",
+            legend.margin         = margin(l = -10)
+        )
+
+    if (!legend) { p <- p + theme(legend.position = "none") }
+    return(p)
+}
+```
+
+```{r run_plot_ppi, fig.height = 4, fig.width = 11}
+asd_risk_genes <- df_asd_rarevar_zscore %>%
+    filter(FDR < 0.001) %>%
+    dplyr::select(ensembl_gene_id, gene_name)
+
+## Label, per regulon: its TF, plus any ASD risk gene in the regulon that has at least one
+## high-confidence PPI edge
+regulon_genes_to_label <- imap(ppi_data_results, function(ppi, mod) {
+    connected <- ppi$edges %>%
+        filter(combined_score > 700) %>%
+        dplyr::select(from_ensembl_gene_id, to_ensembl_gene_id) %>%
+        unlist() %>% unique()
+
+    asd_risk_genes %>%
+        filter(gene_name %in% regulon_gene_names[[mod]], ensembl_gene_id %in% connected) %>%
+        pull(gene_name) %>%
+        c(regulon_tf[[mod]]) %>%
+        unique()
+})
+
+## Generate one plot per regulon
+ppi_plots <- imap(ppi_data_results, ~ plot_module_ppi(
+    .x,
+    min_confidence       = 700,
+    max_BF               = 133,
+    genes_to_label       = regulon_genes_to_label[[.y]],
+    genes_to_bold        = regulon_tf[[.y]],
+    n_top_genes_to_label = 0,
+    legend               = TRUE,
+    seed                 = 345
+) + labs(title = df_stepwise_res$module_label[match(.y, df_stepwise_res$module)]))
+
+p_asd_tf_ppi <- wrap_plots(ppi_plots, nrow = 1, guides = "collect") &
+    theme(legend.position = "bottom",
+          legend.box      = "horizontal",
+          plot.title      = element_text(size = 7, face = "bold", hjust = 0.5))
+
+p_asd_tf_ppi
+
+ggsave(
+    filename = file.path(figures_dir, "supplement", "05_02_ASD-TF-regulon-PPI.pdf"),
+    plot = p_asd_tf_ppi,
+    height    = 6,
+    width     = 7.09,
+    dpi       = 300
+)
+```
+
+
+# --- 5) TMP: compare all ASD-TF regulons --- #
+
+Exploratory panels for choosing which regulons to carry into Fig4. Everything in this
+section is scratch output; delete it once the final examples are picked.
+
+```{r temp_setup}
+# Define which regulons to keep in the supp mat figure (the ones not included in Fig 4)
+regulons_to_plot <- c("ZBTB18_+_+", "FOXP2_(+)", "TCF4_(+)")
+
+# Consensus GO topic per regulon, so each panel is filled in its own program color
+df_top_topic <- readRDS(
+    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+)$consensus %>%
+    dplyr::select(module, topic_label = consensus_topic)
+
+regulon_topic <- df_top_topic %>% filter(module %in% regulons_to_plot) %>% deframe()
+regulon_label <- df_stepwise_res %>% filter(module %in% regulons_to_plot) %>%
+    dplyr::select(module, module_label) %>% deframe()
+
+# One column order for every row of the comparison grid, so panels line up. The GO
+# similarity networks come back from map() in alphabetical order, which would otherwise
+# disagree with the enrichment rows
+regulon_panel_order <- regulons_to_plot
+regulon_label <- regulon_label[regulon_panel_order]
+regulon_topic <- regulon_topic[regulon_panel_order]
+
+# GO enrichments for these regulons, already computed in 02_00
+df_go_res <- readRDS(
+    file.path(analysis_dir, "02_module_enrichments", "02_00_sig-mod-GO-enrichments.RDS")
+) %>%
+    mutate(module = as.character(module))
+
+# Odds-ratio limits shared across panels, taken from the terms actually plotted. Finite
+# values only: a few GO terms have an infinite odds ratio (an empty cell in the 2x2), and
+# a non-finite limit silently drops the color scale and its legend
+shared_or_limits <- function(df, n_top = 12) {
+    df %>%
+        filter(p_value < 0.05) %>%
+        group_by(module) %>%
+        slice_min(p_value, n = n_top, with_ties = FALSE) %>%
+        ungroup() %>%
+        filter(is.finite(odds_ratio)) %>%
+        pull(odds_ratio) %>%
+        range()
+}
+
+# Shared bar plot for both enrichment flavors. Terms are selected at nominal p < 0.05
+# (this is exploratory, and three of five regulons have no BH-significant SynGO terms) but
+# plotted on the FDR scale, so the dashed line marks which of them actually clear BH.
+# Fill ramps white -> topic color by odds ratio on a log scale, with a grayscale key
+# matching Fig 4a: an invisible layer carries the colorbar because fill is an identity scale
+plot_enrichment_bars <- function(df, topic, title, or_limits, n_top = 12) {
+    ramp <- colorRamp(c("white", topic_colors[[topic]]))
+
+    # Odds ratios span more than an order of magnitude, so the ramp is placed on a log
+    # scale; or_limits is shared across regulons so panels can be compared to each other
+    rescale_or <- function(x) {
+        z <- (log10(x) - log10(or_limits[1])) / (log10(or_limits[2]) - log10(or_limits[1]))
+        pmin(pmax(z, 0), 1)
+    }
+
+    d <- df %>%
+        filter(p_value < 0.05) %>%
+        slice_min(p_value, n = n_top, with_ties = FALSE) %>%
+        mutate(
+            fill_color = rgb(ramp(rescale_or(odds_ratio)), maxColorValue = 255),
+            # GO accessions add width without information at this size
+            term       = str_remove(term, "\\s*\\(GO:\\d+\\)") %>% str_wrap(width = 40),
+            term       = fct_reorder(term, -log10(p_adj))
+        )
+
+    if (nrow(d) == 0) {
+        return(ggplot() + theme_void() +
+                   labs(title = paste0(title, "\n(no terms at p < 0.05)")) +
+                   theme(plot.title = element_text(size = 6, hjust = 0.5)))
+    }
+
+    ggplot(d, aes(x = -log10(p_adj), y = term)) +
+        # thin outline so bars at the pale end of the ramp are still visible
+        geom_col(aes(fill = fill_color), width = 0.7, color = "grey60", linewidth = 0.15) +
+        geom_point(aes(color = odds_ratio), shape = NA) +  # invisible; drives the colorbar
+        geom_vline(xintercept = -log10(0.05), linetype = 2, linewidth = 0.3, color = "grey30") +
+        scale_fill_identity() +
+        scale_color_gradientn(colors = c("white", "black"), name = "Odds ratio",
+                              transform = "log10", limits = or_limits,
+                              # vertical bar: these panels put their legends on the right
+                              guide = guide_colorbar(barwidth  = unit(0.15, "cm"),
+                                                     barheight = unit(1.2, "cm"))) +
+        scale_x_continuous(expand = expansion(mult = c(0, 0.08))) +
+        labs(x = "-log10(FDR)", y = NULL, title = title) +
+        theme(
+            plot.title      = element_text(size = 6.5, hjust = 0.5),
+            axis.text.y     = element_text(size = 4.5, color = "black"),
+            axis.text.x     = element_text(size = 5),
+            axis.title.x    = element_text(size = 6),
+            panel.grid      = element_blank(),
+            panel.border    = element_rect(linewidth = 0.25),
+            legend.position = "bottom",
+            legend.title    = element_text(size = 5.5),
+            legend.text     = element_text(size = 5),
+            legend.title.position = "top"
+        )
+}
+```
+
+## 5.1 GO similarity graphs of ASD risk genes in each regulon
+
+```{r temp_go_graphs, fig.height = 3, fig.width = 8.5}
+asd_risk_gene_names <- df_asd_rarevar_zscore %>% filter(FDR < 0.001) %>% pull(gene_name) %>% unique()
+
+node_stats_all <- df_gene_assignments %>%
+    mutate(log_bf = log10(BF)) %>%
+    dplyr::select(gene_name, GO_topic, log_bf)
+
+# Build every graph first so the size / edge-width scales can be shared across regulons.
+# Vertices are supplied explicitly so that risk genes with no GO annotation (and therefore
+# no similarity edges) still appear, as isolated nodes
+regulon_risk_graphs <- map(asd_tf_regulon_nets[regulon_panel_order], function(net) {
+    risk  <- intersect(rownames(net$sim_mat), asd_risk_gene_names)
+    edges <- if (length(risk) >= 2) {
+        go_knn_edges(net$sim_mat[risk, risk], k_nn = 3) %>% filter(similarity > 0)
+    } else {
+        tibble(from = character(), to = character(), similarity = numeric())
+    }
+    graph_from_data_frame(edges, directed = FALSE, vertices = tibble(name = risk))
+})
+
+# Shared scale limits so node size and edge width mean the same thing in every panel
+sim_rng   <- regulon_risk_graphs %>% map(~ E(.x)$similarity) %>% unlist() %>% range()
+logbf_rng <- node_stats_all %>%
+    filter(gene_name %in% unlist(map(regulon_risk_graphs, ~ V(.x)$name))) %>%
+    pull(log_bf) %>% range(na.rm = TRUE)
+
+go_graph_plots <- imap(regulon_risk_graphs, ~ plot_go_graph(
+    net          = .x,
+    node_stats   = node_stats_all,
+    bold_genes   = regulon_tf[[.y]],
+    title        = paste0(regulon_label[[.y]], "\n(", gorder(.x), " ASD genes / ",
+                          length(regulon_gene_names[[.y]]), " total)"),
+    size_range   = c(1, 4),
+    size_limits  = logbf_rng,
+    edge_limits  = sim_rng,
+    # only the first panel draws the GO topic key: panels differ in which topics they
+    # contain, so their fill scales are not identical and patchwork cannot merge them
+    topic_legend = (.y == regulon_panel_order[1]),
+    seed         = 234
+))
+
+wrap_plots(go_graph_plots, nrow = 1, guides = "collect") &
+    theme(legend.position = "right", plot.title = element_text(size = 6.5))
+```
+
+## 5.2 SynGO enrichments per regulon (nominal p < 0.05)
+
+```{r temp_syngo_bars, fig.height = 2.75, fig.width = 8.5}
+# One odds-ratio scale across all five panels so they can be compared
+syngo_or_limits <- shared_or_limits(df_syngo_res)
+
+syngo_bar_plots <- imap(regulon_label, ~ plot_enrichment_bars(
+    df_syngo_res %>% filter(module == .y),
+    topic     = regulon_topic[[.y]],
+    title     = .x,
+    or_limits = syngo_or_limits
+))
+
+wrap_plots(syngo_bar_plots, nrow = 1, guides = "collect") &
+    theme(legend.position = "right")
+```
+
+## 5.3 Top GO enrichments per regulon (from 02_00)
+
+```{r temp_go_bars, fig.height = 2.75, fig.width = 8.5}
+go_or_limits <- shared_or_limits(df_go_res %>% filter(module %in% asd_tf_regulons))
+
+go_bar_plots <- imap(regulon_label, ~ plot_enrichment_bars(
+    df_go_res %>% filter(module == .y, ontology == "BP"),
+    topic     = regulon_topic[[.y]],
+    title     = .x,
+    or_limits = go_or_limits
+))
+
+wrap_plots(go_bar_plots, nrow = 1, guides = "collect") &
+    theme(legend.position = "right")
+```
+
+## 5.4 Combine and export
+
+```{r ASD_TF_plots, fig.height = 8, fig.width = 8}
+# patchwork has no native row headers, so each row is a title strip stacked above its row
+# of panels, and the three composites are then stacked
+row_title <- function(txt) {
+    ggplot() +
+        annotate("text", x = 0, y = 0, label = txt, fontface = "bold", size = 2.8) +
+        theme_void() +
+        coord_cartesian(clip = "off")
+}
+
+row_block <- function(plots, txt) {
+    wrap_plots(
+        row_title(txt),
+        wrap_plots(plots, nrow = 1, guides = "collect") & theme(legend.position = "right"),
+        ncol    = 1,
+        heights = c(0.06, 1)
+    )
+}
+
+# the network row needs more vertical room than the bar rows to keep node labels legible
+p_regulon_comparison <- wrap_plots(
+    free(row_block(go_graph_plots,  "GO similarity of ASD risk genes in the regulon")),
+    row_block(syngo_bar_plots, "SynGO enrichment"),
+    row_block(go_bar_plots,    "GO enrichment (BP only)"),
+    ncol    = 1,
+    heights = c(1.4, 1, 1)
+)
+
+p_regulon_comparison
+
+ggsave(
+    filename = file.path(figures_dir, "supplement", "05_02_ASD-TF-regulon-comparison.pdf"),
+    plot     = p_regulon_comparison,
+    height   = 8,
+    width    = 8,
+    dpi      = 300
+)
+```

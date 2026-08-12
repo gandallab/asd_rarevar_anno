@@ -39,12 +39,13 @@ go_knn_edges <- function(sim_mat, k_nn = 3) {
 #                  FALSE for single-topic GR/MORPH, where it would be a redundant one entry)
 #   seed         : layout seed (graphopt is stochastic)
 #   xmult/ymult  : per-panel padding inside the panel (horizontal / vertical whitespace)
+#   label_vjust  : vertical offset of gene labels (more negative = further above the node)
 #   fill_values  : named vector of GO-topic -> colour (defaults to the project topic_colors)
 plot_go_graph <- function(net, node_stats, bold_genes = character(0), title = NULL,
-                          size_range = c(1, 4), size_limits = NULL, 
+                          size_range = c(1, 4), size_limits = NULL, size_breaks = waiver(),
                           edge_range = c(0.025, 0.40), edge_limits = NULL, edge_color = "gray50",
                           topic_legend = FALSE, seed = 1214, xmult = 0.15, ymult = 0.15,
-                          fill_values = topic_colors) {
+                          label_vjust = -0.8, fill_values = topic_colors) {
     set.seed(seed)
     lay <- create_layout(net, layout = "graphopt", charge = 0.04)
     lay$x <- lay$x * 2
@@ -59,7 +60,7 @@ plot_go_graph <- function(net, node_stats, bold_genes = character(0), title = NU
         geom_node_point(aes(size = log_bf, fill = GO_topic, color = hub_tf, stroke = hub_tf),
                         shape = 21) +
         geom_node_text(aes(label = name, fontface = if_else(hub_tf, "bold", "plain")),
-                       vjust = -0.8, size = 1.6) +
+                       vjust = label_vjust, size = 1.6) +
 
         scale_color_manual(values = c("TRUE" = "black", "FALSE" = "gray90"),
                            guide = "none") +   # hubs shown by black border + bold label
@@ -68,7 +69,8 @@ plot_go_graph <- function(net, node_stats, bold_genes = character(0), title = NU
                               guide = "none") +
         scale_fill_manual(values = fill_values, na.value = "gray70", name = "GO topic",
                           guide = if (topic_legend) "legend" else "none") +
-        scale_size_continuous(range = size_range, limits = size_limits, name = "log10(BF)") +
+        scale_size_continuous(range = size_range, limits = size_limits, breaks = size_breaks,
+                              name = "log10(BF)") +
         scale_edge_width_continuous(range = edge_range, limits = edge_limits) +
         # per-panel whitespace: bigger mult = more padding, network occupies less of the panel
         scale_x_continuous(expand = expansion(mult = xmult)) +

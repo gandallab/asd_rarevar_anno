@@ -1,7 +1,7 @@
 ---
 title: "01a. Stepwise conditional analysis"
 description: "(1) Are modules A & B both individually associated with ASD risk, and (2) Are modules A & B both independently associated with ASD risk? (i.e., does module B still show significant ASD enrichment, even after accounting for module A?)\nCombined across all studies (testing all modules simultaneously)."
-date: 2026-07-06
+date: 2026-08-04
 format: html
 ---
 
@@ -194,7 +194,7 @@ df_individual_assoc <- pre_screen_results %>%
     dplyr::select(study, module, module_label, beta, conf_low, conf_high, p_value, p_adj)
 
 # Filter modules that pass the initial threshold and extract for forward selection screening
-candidate_screen_p <- 0.001
+candidate_screen_p <- 0.05
 candidate_modules <- df_individual_assoc %>%
     dplyr::filter(p_adj < candidate_screen_p & beta > 0) %>% # include only those that were individually (& positively) associated with ASD risk *after* correction for multiple comparisons
     dplyr::pull(module)
@@ -214,6 +214,11 @@ Report independent association statistics for all modules that survived the forw
 
 ```{r stepwise_forward_selection}
 # Initialize for stepwise loop
+# The baseline model is refit here, not just in the chunk above, because the loop
+# overwrites current_model: re-running this chunk without also re-running the
+# initial_model chunk would otherwise start the search from the previous run's
+# final model and admit a module on a non-nested (negative df) F-test
+current_model <- lm(as.formula(initial_formula), data = df_step_model)
 current_predictors <- base_predictors
 remaining_modules <- candidate_modules
 selected_modules <- c()
@@ -331,13 +336,13 @@ risk_gene_regulons <- df_network_data %>%
     pull(module) %>% 
     unique
 
-# Identify co-expression modules where at least one of the top 10 hubs by kME is a risk gene
-df_mod_asd_hubs <- df_module_kme %>% 
+# Identify co-expression modules whose top hub by kME is a risk gene
+df_mod_asd_hubs <- df_module_kme %>%
     filter(module == kME_module) %>% # ensure the kME value corresponds to the module the gene/isoform is in
-    group_by(module) %>% 
-    arrange(module, -kME) %>% 
-    mutate(rank = row_number()) %>% 
-    filter(rank %in% 1:10) %>% # filter for the top 10 hub genes by kME in each module
+    group_by(module) %>%
+    arrange(module, -kME) %>%
+    mutate(rank = row_number()) %>%
+    filter(rank == 1) %>% # filter for the single top hub gene by kME in each module
     filter(ensembl_gene_id %in% asd_risk_genes)
 risk_gene_mods <- df_mod_asd_hubs %>% 
     pull(module) %>% 
@@ -431,7 +436,7 @@ df_individual_assoc %>%
     write_csv(file.path(notebook_out_dir, "01_00_marginal-stats-all-modules.csv"))
 ```
 
-## 4.3 Number of risk genes in kME top 10 for co-expression modules
+## 4.3 Co-expression modules whose top hub by kME is an ASD risk gene
 
 ```{r hub_risk_genes}
 asd_risk_genes <- df_asd_rarevar_zscore %>% 
@@ -443,10 +448,10 @@ df_hub_risk_genes <- df_module_kme %>%
     dplyr::select(-kME_module) %>% 
     group_by(module) %>% 
     
-    # filter for the top 10 hub genes by kME in each module
-    arrange(module, -kME) %>% 
-    mutate(kME_rank = row_number()) %>% 
-    filter(kME_rank %in% 1:10) %>%
+    # filter for the single top hub gene by kME in each module
+    arrange(module, -kME) %>%
+    mutate(kME_rank = row_number()) %>%
+    filter(kME_rank == 1) %>%
     ungroup %>% 
     
     # filter for ASD risk genes
@@ -516,7 +521,7 @@ p_step1_sensitivity <- ggplot(df_step1_heatmap, aes(x = step1_threshold, y = mod
     scale_x_discrete(expand = c(0, 0)) +
     scale_y_discrete(labels = deframe(module_labels), expand = c(0, 0)) +
     labs(
-        x = "STEP 1 candidate threshold (FDR)",
+        x = "Candidate module threshold (FDR)",
         y = NULL,
         title = "Independently associated modules\nacross candidate thresholds"
     ) +
@@ -525,317 +530,17 @@ p_step1_sensitivity <- ggplot(df_step1_heatmap, aes(x = step1_threshold, y = mod
         panel.grid   = element_blank(),
         panel.border = element_blank(),
         legend.key.size = unit(0.3, "cm"),
-        legend.margin = margin(l = -5)
+        legend.margin = margin(l = -5),
+        plot.title = element_text(face = "bold")
     )
 
 p_step1_sensitivity
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "01_00_stepwise_linear_step1p_sensitivity.png"),
+    filename = file.path(figures_dir, "supplement", "01_00_stepwise_linear_step1p_sensitivity.pdf"),
     plot = p_step1_sensitivity,
     height = 5.5,
     width = 3.2,
     dpi = 300
-)
-```
-
-
-# DEPR ##
-
-What is different between our old and current models?
-```{r different_models}
-depr_stepwise_res <- readRDS(file.path(project_dir, "outputs_depr", "objects", "2026.01.06_stepwise-linear-results-p0.001-SIG.RDS"))
-
-setdiff(df_stepwise_res$module, depr_stepwise_res$module)
-setdiff(depr_stepwise_res$module, df_stepwise_res$module)
-```
-
-
-## 1. Module significance: -log10(p) x OR
-
-See 02a_module-enrichments.qmd for final main text figure
-
-```{r plot_significance_forSlide, fig.height = 4, fig.width = 5}
-df_stepwise_res %>%
-    mutate(label = module) %>%
-    
-    # Layout
-    ggplot(aes(x = beta, y = -log10(p_adj))) +
-    #geom_segment(aes(x = conf_low, xend = conf_high)) + # turn on for error bars
-    geom_point(aes(fill = study, color = hub_is_risk_gene, size = n), shape = 21) +
-    ggrepel::geom_text_repel(
-        aes(label = label),
-        size = 2.25,
-        min.segment.length = 0,
-        max.overlaps = Inf,
-        force = 1,
-        box.padding = 0.25,
-        point.padding = 0.5,
-        segment.color = "grey50",
-        color = "black",
-        show.legend = FALSE,
-        inherit.aes = TRUE
-    ) +
-    
-    # Aesthetics
-    scale_x_log10() +
-    scale_color_manual(values = c("TRUE" = "black", "FALSE" = "gray")) +
-    scale_fill_paletteer_d("ggsci::default_locuszoom") +
-    scale_size_continuous(range = c(2, 5)) +
-    guides(fill = guide_legend(title = NULL, label.hjust = 1),
-           size = guide_legend(title = "Gene set size", label.hjust = 1),
-           color = guide_legend(title = "Hub / TF is risk gene", label.hjust = 1)
-    ) +
-    #facet_wrap(vars(network_list), scales = "free") +
-    coord_cartesian(clip = "off") +
-    labs(
-        x = "Beta coefficient",
-        y = "-log10(FDR)",
-        title = "Modules enriched for ASD risk genes"
-    ) +
-    theme(
-        legend.key.size = unit(0.3, "cm"),
-        legend.background = element_rect(color = "black", linewidth = 0.25),
-        legend.position = c(0.99, 0.98),
-        legend.box = "vertical",
-        legend.box.just = "right",
-        legend.justification = c("right", "top"),
-        legend.spacing = unit(0.05, "cm")
-    )
-
-# Save plot
-f_save_plot(
-    plot_name = "01_significant_modules_fdr0-001.pdf",
-    overwrite = TRUE,
-    height = 4,
-    width = 5,
-    dpi = 300
-)
-```
-
-```{r plot_significance_forFigure, fig.height = 4.0, fig.width = 3.2}
-df_stepwise_res %>%
-    mutate(label = module) %>%
-    
-    # Layout
-    ggplot(aes(x = beta, y = -log10(p_adj))) +
-    #geom_segment(aes(x = conf_low, xend = conf_high)) + # turn on for error bars
-    geom_point(aes(fill = study, color = hub_is_risk_gene, size = n), shape = 21) +
-    ggrepel::geom_text_repel(
-        aes(label = label),
-        size = 2.0,
-        min.segment.length = 0,
-        max.overlaps = Inf,
-        force = 1,
-        box.padding = 0.25,
-        point.padding = 0.5,
-        segment.color = "grey50",
-        color = "black",
-        show.legend = FALSE,
-        inherit.aes = TRUE
-    ) +
-    
-    # Aesthetics
-    scale_x_log10() +
-    scale_color_manual(values = c("TRUE" = "black", "FALSE" = "gray")) +
-    scale_fill_paletteer_d("ggsci::default_locuszoom") +
-    scale_size_continuous(range = c(2, 5)) +
-    guides(fill = guide_legend(title = NULL, label.hjust = 1),
-           size = guide_legend(title = "Gene set size", label.hjust = 1),
-           color = guide_legend(title = "Hub / TF is risk gene", label.hjust = 1)
-    ) +
-    #facet_wrap(vars(network_list), scales = "free") +
-    coord_cartesian(clip = "off") +
-    labs(
-        x = "Beta coefficient",
-        y = "-log10(FDR)",
-        title = "Modules enriched for ASD risk genes"
-    ) +
-    theme(
-        legend.key.size = unit(0.3, "cm"),
-        legend.background = element_rect(color = "transparent", linewidth = 0.25),
-        legend.position = "bottom",
-        legend.box = "horizontal",
-        legend.direction = "vertical",
-        legend.box.just = "top",
-        legend.title.position = "top",
-        legend.box.margin = margin(t = -7),
-        legend.spacing = unit(0.25, "cm"),
-        panel.border = element_rect(linewidth = 0.5)
-    )
-
-# Save plot
-f_save_plot(
-    plot_name = "01_module_significance_fdr0-001_forFig.pdf",
-    overwrite = TRUE,
-    height = 4.0,
-    width = 3.5,
-    dpi = 300
-)
-```
-
-## 2. Cook's distance (identify driver genes)
-
-```{r}
-#| cooks_distance,
-#| fig-height: 3.5, 
-#| fig-width: 6.5
-df_cooks_d_plot <- df_asd_networks_LogReg_cond %>% 
-    filter(!map_lgl(data, is.null)) %>% # remove NULL results
-    mutate(
-        cooks_d = map(
-            .x = data,
-            .f = ~ calculate_cooks_distance(.x$input_data %>% dplyr::rename_at(1, ~ "geneID"), .x$final_model)
-        ),
-        cooks_d_plot = pmap(
-            .l = list(..1 = cooks_d, ..2 = gene_id_type, ..3 = network_list),
-            .f = ~ plot_cooks_d(..1 %>% filter(is_influential),
-                                gene_id_type = ..2,
-                                network_list = ..3,
-                                remove_TTN = TRUE,
-                                label_threshold = 0.01
-            )
-        )
-    ) %>% 
-    dplyr::select(-data)
-wrap_plots(df_cooks_d_plot$cooks_d_plot, nrow = 2) &
-    plot_annotation(title = "Per-gene cook's distance estimations")
-
-
-ggsave(
-    filename = paste0(figures_dir, "01_CooksD_results.png"),
-    height = 3.5, width = 6.5
-)
-```
-
-## 3. Cook's distance vs gene length (check for gene length bias)
-
-```{r cooks_distance_length, fig.height = 3.5, fig.width = 6.5}
-df_cooks_d_length_plot <- df_cooks_d_plot %>% 
-    dplyr::select(-cooks_d_plot) %>% 
-    
-    mutate(
-        cooks_d_length = map2(
-            .x = cooks_d,
-            .y = gene_id_type,
-            .f = ~ {
-                
-                id_col <- switch(.y,
-                                 "symbol" = "gene_name",
-                                 "ensembl" = "ensembl_gene_id",
-                                 stop("Invalid gene_id_type specified.")
-                )
-                
-                cooks_d_length <- .x %>% 
-                    setNames(c(id_col, setdiff(names(.), "geneID"))) %>% 
-                    left_join(df_asd_rarevar %>% 
-                                  dplyr::select(gene_name, ensembl_gene_id, union_cds_length, log_union_cds),
-                              by = id_col
-                    )
-                
-                return(cooks_d_length)
-            }
-        ),
-        cooks_d_length_plot = map2(
-            .x = cooks_d_length,
-            .y = network_list,
-            .f = ~ .x %>%
-                filter(gene_name != "TTN" & is_influential) %>% 
-                
-                ggplot(aes(x = union_cds_length, y = cooks_d)) +
-                geom_point(size = 0.5) +
-                stat_cor(label.sep = "\n", size = 2.5, vjust = 1) +
-                geom_smooth(method = "lm", linewidth = 0.5) +
-                labs(x = "transcript length", y = "Cook's distance",
-                     title = .y)
-        )
-    )
-wrap_plots(df_cooks_d_length_plot$cooks_d_length_plot, nrow = 2) &
-    plot_annotation(title = "Cook's distance vs transcript length\n(TTN removed)")
-
-ggsave(
-    filename = paste0(figures_dir, "01_network_ASDbin_cond_CooksD_vs_length.png"),
-    height = 3.5, width = 6.5
-)
-```
-
-## 4. Q-Q plot (check distribution of residuals)
-
-```{r qq_plot, fig.height = 3.5, fig.width = 6.5}
-df_qq_plot <- df_asd_networks_LogReg_cond %>% 
-    
-    mutate(
-        qq_data = pmap(
-            .l = list(..1 = data, ..2 = gene_id_type, ..3 = network_list),
-            .f = ~ {
-                
-                # Extract model and input data
-                model <- ..1$final_model
-                input_data <- ..1$input_data
-                id_col <- switch(..2,
-                                 "symbol" = "gene_name",
-                                 "ensembl" = "ensembl_gene_id",
-                                 stop("Invalid gene_id_type specified.")
-                )
-                df_tmp <- gene_networks[[..3]]
-                
-                # Identify gene name
-                geneIDs <- input_data %>% pull(1)
-                
-                # Calculate deviance residuals
-                resids <- residuals(model)
-
-                # Combine in tibble
-                qq_data <- tibble(
-                    geneID = geneIDs,
-                    residuals = resids
-                ) %>% 
-                    setNames(c(id_col, setdiff(names(.), "geneID"))) %>% 
-                    distinct()
-                
-                # Add gene name (if not already there)
-                if (id_col == "ensembl_gene_id") {
-                    qq_data <- qq_data %>% 
-                        left_join(
-                            df_tmp %>% dplyr::select(ensembl_gene_id, gene_name),
-                            by = id_col
-                        ) %>% 
-                        distinct()
-                }
-                
-                # Add labels for top n genes
-                qq_data %>% 
-                    arrange(-residuals) %>% 
-                    mutate(rank = row_number()) %>% 
-                    mutate(
-                        top_gene = rank %in% 1:10,
-                        label = ifelse(top_gene, gene_name, ""),
-                        theoretical = qnorm((1:nrow(.) - 0.5) / nrow(.))
-                    )
-                
-            }
-        )
-    )
-df_qq_plot %>% 
-    dplyr::select(network_list, qq_data) %>% 
-    unnest(cols = c(qq_data)) %>%
-    arrange(residuals) %>% 
-
-    ggplot(aes(x = -theoretical, y = residuals)) +
-    geom_qq_line(aes(sample = residuals), linetype = 2, color = "#ef8a47", linewidth = 0.75) + # add qq line
-    geom_text_repel(aes(label = label), 
-                    size = 2.0, min.segment.length = 0, max.overlaps = 100, segment.color = "grey50",
-                    nudge_x = -2, direction = "y", hjust = "right"
-                    ) +
-    geom_point(aes(size = top_gene, fill = top_gene), shape = 21, color = "black") +
-    facet_wrap(vars(network_list), nrow = 2) +
-    
-    scale_size_manual(values = c("TRUE" = 1.5, "FALSE" = 0.25), guide = NULL) +
-    scale_fill_manual(values = c("TRUE" = "#ef8a47", "FALSE" = "black"), guide = NULL) +
-    labs(x = "Theoretical quantiles (normal)", y = "Observed",
-         title = "LR QQ plot")
-ggsave(
-    filename = paste0(figures_dir, "01_network_ASDbin_cond_QQ.png"),
-    height = 3.5, width = 6.5
 )
 ```

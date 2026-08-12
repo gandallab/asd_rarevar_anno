@@ -1,0 +1,1752 @@
+---
+title: "Module-level O/E enrichment analyses"
+description: "Observed/expected de novo mutation burden for SynGO and GO pathways, across proband and sibling cohorts (ASD-D, ASD-DA, all probands, siblings)."
+date: 2026-07-16
+format: html
+---
+
+# --- 0) Setup --- 
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Set output directory for notebook analysis
+notebook_out_dir <- file.path(analysis_dir, "06_gene_set_DDID_stratification")
+```
+
+```{r load_data}
+# Background mutation rates + full proband/sibling counts
+df_asd_dnm <- read_tsv(
+    file.path(data_dir, "full_results_wcounts_2025-10-08.txt"),
+    show_col_types = FALSE
+) %>%
+    clean_names() %>%
+    mutate(mu_total = mu_lof + mu_mis2 + mu_mis1)
+
+# ASD-D / ASD-DA proband counts (ASC)
+df_counts_asd_d   <- read_xlsx(file.path(data_dir, "DDID", "counts_asd_ddid.xlsx"))   %>% clean_names()
+df_counts_asd_da <- read_xlsx(file.path(data_dir, "DDID", "counts_asd_noddid.xlsx")) %>% clean_names()
+
+# Kaplanis DDD counts (all ASD-D; sex-stratified Male/Female columns)
+# N = 1,194 (adds to ASC ASD-D N = 12,647 → total ASD-D N = 13,841)
+df_counts_kaplanis <- read_tsv(
+    file.path(data_dir, "DDID", "Kaplanis_DDD_ASD_counts_by_gene_new_mis_cats_2025-04-09.txt"),
+    show_col_types = FALSE
+) %>%
+    clean_names()
+
+# SynGO data
+syngo_dir      <- file.path(data_dir, "SynGO")
+df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
+```
+
+
+# --- 1) O/E enrichment across all SynGO pathways --- #
+
+## 1.1 Format data
+
+```{r format_counts_syngo}
+# Proband and sibling counts from the full file; ASD-D/ASD-DA from separate files
+df_counts <- df_asd_dnm %>%
+    select(gene, mu_total,
+           ptv_proband, mis2_proband, mis1_proband,
+           ptv_sibling, mis2_sibling, mis1_sibling) %>%
+    mutate(
+        count_proband = ptv_proband + mis2_proband + mis1_proband,
+        count_sibling = ptv_sibling + mis2_sibling + mis1_sibling
+    ) %>%
+    left_join(
+        df_counts_asd_d %>%
+            mutate(count_asd_d_proband = ptv_proband + mis2_proband + mis1_proband) %>%
+            select(gene, count_asd_d_proband) %>%
+            left_join(
+                df_counts_kaplanis %>%
+                    mutate(count_kaplanis = (ptv_proband_male + ptv_proband_female) +
+                                            (mis2_proband_male + mis2_proband_female) +
+                                            (mis1_proband_male + mis1_proband_female)) %>%
+                    select(gene, count_kaplanis),
+                by = "gene"
+            ) %>%
+            mutate(count_asd_d_proband = count_asd_d_proband + replace_na(count_kaplanis, 0)) %>%
+            select(gene, count_asd_d_proband),
+        by = "gene"
+    ) %>%
+    left_join(
+        df_counts_asd_da %>%
+            mutate(count_asd_da_proband = ptv_proband + mis2_proband + mis1_proband) %>%
+            select(gene, count_asd_da_proband),
+        by = "gene"
+    )
+```
+
+Build one gene set per SynGO pathway using the annotations file (one row per
+gene–pathway pair). Only pathways with ≥ 5 genes matched in the count data are kept.
+
+```{r build_syngo_gene_sets}
+# IDs that appear as someone's parent_id have children → not leaf nodes
+has_children <- na.omit(df_syngo_ontol$parent_id)
+
+# One row per pathway with a list of its genes. hgnc_symbol is a comma-space-delimited
+# string of genes per pathway, so split it to one gene per row before grouping.
+df_syngo_gene_sets <- df_syngo_ontol %>%
+    select(id, name, domain, hgnc_symbol) %>%
+    filter(!is.na(hgnc_symbol)) %>%
+    separate_rows(hgnc_symbol, sep = ", ") %>%
+    mutate(hgnc_symbol = str_trim(hgnc_symbol)) %>%
+    group_by(id, name, domain) %>%
+    summarise(genes = list(unique(hgnc_symbol)), .groups = "drop") %>%
+    mutate(
+        n_genes       = map_int(genes, length),
+        matched_genes = map(genes, ~ .x[.x %in% df_counts$gene]),   # genes present in the DNM counts
+        n_matched     = map_int(matched_genes, length)
+    ) %>%
+    filter(n_matched >= 5) %>%
+    left_join(
+        df_syngo_ontol %>% select(id, name_hierarchical, shortname, parent_id),
+        by = "id"
+    ) %>%
+    
+    # identify if pathway is root, intermediate, or leaf
+    mutate(
+        category = case_when(
+            is.na(parent_id)        ~ "root",
+            id %in% has_children ~ "intermediate",
+            TRUE                    ~ "leaf"
+        )
+    )
+
+cat(sprintf(
+    "%d SynGO pathways with >= 5 matched genes (%d BP, %d CC)\n",
+    nrow(df_syngo_gene_sets),
+    sum(df_syngo_gene_sets$domain == "BP"),
+    sum(df_syngo_gene_sets$domain == "CC")
+))
+cat(sprintf(
+    "  root: %d  |  intermediate: %d  |  leaf: %d\n",
+    sum(df_syngo_gene_sets$category == "root"),
+    sum(df_syngo_gene_sets$category == "intermediate"),
+    sum(df_syngo_gene_sets$category == "leaf")
+))
+```
+
+
+## 1.2 O/E analysis helper functions
+
+```{r helpers_syngo}
+# --- Garwood (1936) exact Poisson CI for O/E ratio --- #
+# p-value: exact Poisson test of H0: obs ~ Poisson(exp), i.e. O/E = 1
+oe_garwood <- function(obs, exp) {
+    oe   <- obs / exp
+    ci_l <- if (obs > 0) qchisq(0.025, 2 * obs) / (2 * exp) else 0
+    ci_h <- qchisq(0.975, 2 * (obs + 1)) / (2 * exp)
+    p    <- if (obs > 0 && exp > 0)
+                poisson.test(obs, T = exp, alternative = "two.sided")$p.value
+            else NA_real_
+    list(oe = oe, ci_l = ci_l, ci_h = ci_h, p = p)
+}
+
+# --- Pairwise conditional binomial test --- #
+pairwise_binom <- function(obs1, exp1, obs2, exp2) {
+    obs1 <- as.numeric(obs1)[1]; exp1 <- as.numeric(exp1)[1]
+    obs2 <- as.numeric(obs2)[1]; exp2 <- as.numeric(exp2)[1]
+
+    # Completely uninformative: missing inputs or both groups have zero observed
+    if (any(is.na(c(obs1, obs2, exp1, exp2))) || (obs1 == 0 && obs2 == 0))
+        return(tibble(rel_rr = NA_real_, ci_l = NA_real_, ci_h = NA_real_, p = NA_real_))
+
+    rel <- (obs1 / exp1) / (obs2 / exp2)   # = 0 when obs1 = 0; Inf when obs2 = 0
+    p0  <- exp1 / (exp1 + exp2)
+    p   <- binom.test(obs1, obs1 + obs2, p0, alternative = "two.sided")$p.value
+
+    # Log-scale SE requires both counts > 0; return rel_rr + p but no CI when one is zero
+    if (obs1 == 0 || obs2 == 0)
+        return(tibble(rel_rr = rel, ci_l = NA_real_, ci_h = NA_real_, p = p))
+
+    se <- sqrt(1 / obs1 + 1 / obs2)
+    tibble(
+        rel_rr = rel,
+        ci_l   = exp(log(rel) - qnorm(0.975) * se),
+        ci_h   = exp(log(rel) + qnorm(0.975) * se),
+        p      = p
+    )
+}
+
+# Cohort sample sizes
+N_cohorts <- list(
+    asd_da_proband = 24839L,
+    asd_d_proband   = 13841L,
+    proband        = 38680L,
+    sibling        =  9567L
+)
+```
+
+## 1.3 Calculate O/E per SynGO pathway per cohort
+
+```{r oe_per_pathway_syngo}
+cohort_spec <- tribble(
+    ~cohort,            ~count_col,             ~n,
+    "proband",          "count_proband",         N_cohorts$proband,
+    "sibling",          "count_sibling",         N_cohorts$sibling,
+    "asd_d_proband",    "count_asd_d_proband",    N_cohorts$asd_d_proband,
+    "asd_da_proband",   "count_asd_da_proband",  N_cohorts$asd_da_proband
+)
+
+# Run analysis across all cohorts for each pathway
+# Load from cache if it's already been run
+oe_cache <- file.path(notebook_out_dir, "06_01_SynGO-OE.RDS")
+
+if (file.exists(oe_cache)) {
+    df_oe_syngo <- readRDS(oe_cache)
+} else {
+    
+    df_oe_syngo <- map2_dfr(
+        .x = cohort_spec$cohort,
+        .y = cohort_spec$count_col,
+        .f = function(cohort_name, cnt_col) {
+            
+            n_cohort <- cohort_spec %>% filter(cohort == cohort_name) %>% pull(n)
+            
+            df_syngo_gene_sets %>%
+                select(id, name, domain, matched_genes, n_genes, n_matched, category) %>%
+                pmap_dfr(function(id, name, domain, matched_genes, n_genes, n_matched, category) {
+                    
+                    m   <- df_counts %>% filter(gene %in% matched_genes)
+                    obs <- sum(m[[cnt_col]], na.rm = TRUE)
+                    exp <- sum(m$mu_total,   na.rm = TRUE) * 2 * n_cohort
+                    ci  <- oe_garwood(obs, exp)
+                    
+                    tibble(
+                        id     = id,
+                        name   = name,
+                        domain = domain,
+                        category  = category,
+                        cohort    = cohort_name,
+                        n_genes   = n_genes,
+                        n_matched = n_matched,
+                        n_cohort  = n_cohort,
+                        obs       = obs,
+                        exp       = round(exp, 4),
+                        oe        = ci$oe,
+                        ci_l      = ci$ci_l,
+                        ci_h      = ci$ci_h,
+                        p         = ci$p
+                    )
+                })
+        }
+    ) %>%
+        group_by(cohort) %>%
+        mutate(p_fdr = p.adjust(p, method = "BH")) %>%
+        ungroup() %>%
+        arrange(p)
+    
+    saveRDS(df_oe_syngo, oe_cache)
+    
+}
+```
+
+## 1.4 Cohort pairwise comparisons within each SynGO term
+
+For each pathway, compare:
+- Proband vs Sibling (overall enrichment)
+- ASD-D_Proband vs ASD-DA_Proband (ASD-D specificity)
+- ASD-D_Proband vs Sibling
+- ASD-DA_Proband vs Sibling
+
+```{r cohort_pairs_syngo}
+cohort_pairs <- list(
+    c("proband",        "sibling"),
+    c("asd_d_proband",   "asd_da_proband"),
+    c("asd_d_proband",   "sibling"),
+    c("asd_da_proband", "sibling")
+)
+
+# Run analysis across all pairwise combinations of cohorts
+# Load from cache if it's already been run
+pairwise_cache <- file.path(notebook_out_dir, "06_01_SynGO-pairwise-RR.RDS")
+
+if (file.exists(pairwise_cache)) {
+    df_pairwise_syngo <- readRDS(pairwise_cache)
+} else {
+    
+    df_pairwise_syngo <- df_syngo_gene_sets %>%
+        select(id) %>%
+        pmap_dfr(function(id) {
+            map_dfr(cohort_pairs, function(pair) {
+                ga <- pair[1]; gb <- pair[2]
+                sa <- df_oe_syngo %>% filter(id == !!id, cohort == ga)
+                sb <- df_oe_syngo %>% filter(id == !!id, cohort == gb)
+                bind_cols(
+                    tibble(id = id, comparison = paste(ga, "vs", gb)),
+                    pairwise_binom(sa$obs, sa$exp, sb$obs, sb$exp)
+                )
+            })
+        }) %>%
+        mutate(p_fdr = p.adjust(p, method = "BH")) %>%
+        left_join(
+            df_syngo_gene_sets %>% select(id, name, domain, n_matched, category),
+            by = "id"
+        ) %>%
+        arrange(p)
+    
+    saveRDS(df_pairwise_syngo, pairwise_cache)
+    
+}
+```
+
+## 1.5 Export tables
+
+```{r export_tables}
+df_oe_syngo %>%
+    arrange(cohort, p) %>%
+    write_csv(file.path(notebook_out_dir, "06_01_SynGO_OE_ratios.csv"))
+
+df_pairwise_syngo %>%
+    arrange(comparison, p) %>%
+    write_csv(file.path(notebook_out_dir, "06_01_SynGO_cohort_pairwise_RR.csv"))
+```
+
+
+# --- 2) GO analysis --- #
+
+## 2.1 Format data
+
+Build one gene set per GO pathway using `org.Hs.eg.db` (all evidence codes) and
+`GO.db` for term metadata and hierarchy. Pathways with fewer than 5 or more
+than 1,000 matched genes in the count data are excluded.
+
+```{r build_go_gene_sets}
+# --- Gene symbol --> GO term annotations --- #
+
+go_annot_raw <- AnnotationDbi::select(
+    org.Hs.eg.db,
+    keys    = keys(org.Hs.eg.db, keytype = "SYMBOL"),
+    columns = c("GO", "ONTOLOGY"),
+    keytype = "SYMBOL"
+) %>%
+    as_tibble() %>%
+    clean_names() %>%
+    filter(!is.na(go), !is.na(ontology)) %>%
+    select(gene = symbol, id = go, domain = ontology) %>%
+    distinct()
+
+# --- GO term names --- #
+go_terms <- AnnotationDbi::select(
+    GO.db,
+    keys    = unique(go_annot_raw$id),
+    columns = "TERM",
+    keytype = "GOID"
+) %>%
+    as_tibble() %>%
+    clean_names() %>%
+    rename(id = goid, name = term)
+
+# --- Hierarchy: identify root / intermediate / leaf nodes --- #
+# A term has children if it appears as a key with non-NULL entries in *CHILDREN
+go_children_list <- c(
+    as.list(GOBPCHILDREN),
+    as.list(GOCCCHILDREN),
+    as.list(GOMFCHILDREN)
+)
+has_children_ids <- names(go_children_list)[
+    !sapply(go_children_list, function(x) is.null(x) || all(is.na(x)))
+]
+
+# A term is a root if its only parent is the virtual "all" node
+go_parents_list <- c(
+    as.list(GOBPPARENTS),
+    as.list(GOCCPARENTS),
+    as.list(GOMFPARENTS)
+)
+root_ids <- names(go_parents_list)[
+    sapply(go_parents_list, function(x) is.null(x) || all(x == "all"))
+]
+
+# --- Build gene sets per GO term --- #
+df_go_gene_sets <- go_annot_raw %>%
+    left_join(go_terms, by = "id") %>%
+    filter(!is.na(name)) %>%
+    group_by(id, name, domain) %>%
+    summarise(genes = list(unique(gene)), .groups = "drop") %>%
+    mutate(
+        n_genes       = map_int(genes, length),
+        matched_genes = map(genes, ~ .x[.x %in% df_counts$gene]),
+        n_matched     = map_int(matched_genes, length)
+    ) %>%
+    filter(n_matched >= 5, n_matched <= 1000) %>%
+    mutate(
+        category = case_when(
+            id %in% root_ids         ~ "root",
+            id %in% has_children_ids ~ "intermediate",
+            TRUE                        ~ "leaf"
+        )
+    )
+
+cat(sprintf(
+    "%d GO pathways with 5–1000 matched genes (BP: %d, CC: %d, MF: %d)\n",
+    nrow(df_go_gene_sets),
+    sum(df_go_gene_sets$domain == "BP"),
+    sum(df_go_gene_sets$domain == "CC"),
+    sum(df_go_gene_sets$domain == "MF")
+))
+cat(sprintf(
+    "  root: %d  |  intermediate: %d  |  leaf: %d\n",
+    sum(df_go_gene_sets$category == "root"),
+    sum(df_go_gene_sets$category == "intermediate"),
+    sum(df_go_gene_sets$category == "leaf")
+))
+```
+
+
+## 2.2 O/E per GO pathway per cohort
+
+```{r oe_per_pathway_go}
+# Run analysis across all cohorts for each pathway
+# Load from cache if it's already been run
+oe_cache <- file.path(notebook_out_dir, "06_01_all-GO-OE.RDS")
+
+if (file.exists(oe_cache)) {
+    df_oe_go <- readRDS(oe_cache)
+} else {
+    
+    df_oe_go <- map2_dfr(
+        .x = cohort_spec$cohort,
+        .y = cohort_spec$count_col,
+        .f = function(cohort_name, cnt_col) {
+            
+            n_cohort <- cohort_spec %>% filter(cohort == cohort_name) %>% pull(n)
+            
+            df_go_gene_sets %>%
+                select(id, name, domain, matched_genes, n_genes, n_matched, category) %>%
+                pmap_dfr(function(id, name, domain, matched_genes, n_genes, n_matched, category) {
+                    
+                    m   <- df_counts %>% filter(gene %in% matched_genes)
+                    obs <- sum(m[[cnt_col]], na.rm = TRUE)
+                    exp <- sum(m$mu_total,   na.rm = TRUE) * 2 * n_cohort
+                    ci  <- oe_garwood(obs, exp)
+                    
+                    tibble(
+                        id     = id,
+                        name   = name,
+                        domain = domain,
+                        category  = category,
+                        cohort    = cohort_name,
+                        n_genes   = n_genes,
+                        n_matched = n_matched,
+                        n_cohort  = n_cohort,
+                        obs       = obs,
+                        exp       = round(exp, 4),
+                        oe        = ci$oe,
+                        ci_l      = ci$ci_l,
+                        ci_h      = ci$ci_h,
+                        p         = ci$p
+                    )
+                })
+        }
+    ) %>%
+        group_by(cohort) %>%
+        mutate(p_fdr = p.adjust(p, method = "BH")) %>%
+        ungroup() %>%
+        arrange(p)
+    
+    saveRDS(df_oe_go, oe_cache)
+    
+}
+```
+
+## 2.3 Cohort pairwise comparisons
+
+```{r cohort_pairs_go}
+# Run analysis across all pairwise combinations of cohorts
+# Load from cache if it's already been run
+pairwise_cache <- file.path(notebook_out_dir, "06_01_all-GO-pairwise-RR.RDS")
+
+if (file.exists(pairwise_cache)) {
+    df_pairwise_go <- readRDS(pairwise_cache)
+} else {
+    
+    df_pairwise_go <- df_go_gene_sets %>%
+        select(id) %>%
+        pmap_dfr(function(id) {
+            map_dfr(cohort_pairs, function(pair) {
+                ga <- pair[1]; gb <- pair[2]
+                sa <- df_oe_go %>% filter(id == !!id, cohort == ga)
+                sb <- df_oe_go %>% filter(id == !!id, cohort == gb)
+                bind_cols(
+                    tibble(id = id, comparison = paste(ga, "vs", gb)),
+                    pairwise_binom(sa$obs, sa$exp, sb$obs, sb$exp)
+                )
+            })
+        }) %>%
+        mutate(p_fdr = p.adjust(p, method = "BH")) %>%
+        left_join(
+            df_go_gene_sets %>% select(id, name, domain, n_matched, category),
+            by = "id"
+        ) %>%
+        arrange(p)
+    
+    saveRDS(df_pairwise_go, pairwise_cache)
+    
+}
+```
+
+
+# --- 3) Plots --- #
+
+```{r plot_globals}
+sig_thresh <- 0.05
+
+cohort_labels <- c(
+    proband        = "All probands",
+    sibling        = "Siblings",
+    asd_d_proband   = "ASD-D probands",
+    asd_da_proband = "ASD-DA probands"
+)
+
+col_sig_group <- c(
+    "Both"       = "#885371",
+    "ASD-D only"  = "#C0392B",
+    "ASD-DA only"= "#4472C4",
+    "Neither"    = "grey75"
+)
+# # SynGO pathway order within each domain: sort by proband O/E descending
+# pathway_order_syngo <- df_oe_syngo %>%
+#     filter(cohort == "proband") %>%
+#     arrange(go_domain, desc(oe)) %>%
+#     pull(go_name)
+# 
+# # GO pathway order within each domain: sort by proband O/E descending
+# pathway_order_go <- df_oe_go %>%
+#     filter(cohort == "proband") %>%
+#     arrange(go_domain, desc(oe)) %>%
+#     pull(go_name)
+```
+
+## 3.1 SynGO scatter: ASD-DA vs siblings (x) × ASD-D vs siblings (y)
+
+```{r syngo_scatter, fig.height = 2.6, fig.width = 7.1}
+# --- Build wide data: one row per pathway --- #
+df_scatter_syngo <- df_pairwise_syngo %>%
+    filter(comparison %in% c("asd_d_proband vs sibling", "asd_da_proband vs sibling")) %>%
+    select(id, name, domain, comparison, rel_rr, ci_l, ci_h, n_matched, p_fdr) %>%
+    mutate(group = if_else(comparison == "asd_d_proband vs sibling", "asd_d", "asd_da")) %>%
+    select(-comparison) %>%
+    pivot_wider(
+        id_cols     = c(id, name, domain, n_matched),
+        names_from  = group,
+        values_from = c(rel_rr, ci_l, ci_h, p_fdr)
+    ) %>%
+    left_join(
+        df_pairwise_syngo %>%
+            filter(comparison == "asd_d_proband vs asd_da_proband") %>%
+            select(id, p_fdr_asd_d_asd_da = p_fdr, rel_rr_asd_d_asd_da = rel_rr),
+        by = "id"
+    ) %>%
+    mutate(
+        sig_asd_d_asd_da = replace_na(p_fdr_asd_d_asd_da < sig_thresh, FALSE),
+        sig_asd_d        = replace_na(p_fdr_asd_d   < sig_thresh, FALSE),
+        sig_asd_da      = replace_na(p_fdr_asd_da < sig_thresh, FALSE),
+        sig_group = case_when(
+            sig_asd_d  &  sig_asd_da ~ "Both",
+            sig_asd_d  & !sig_asd_da ~ "ASD-D only",
+            !sig_asd_d &  sig_asd_da ~ "ASD-DA only",
+            TRUE                    ~ "Neither"
+        ),
+        sig_group = factor(sig_group,
+                           levels = c("Both", "ASD-D only", "ASD-DA only", "Neither"))
+    )
+
+# Pathways explicitly cited in the manuscript text (to label)
+highlight_ids <- c(
+    "GO:0099056",  # integral component of presynaptic membrane        (DDID-biased)
+    "GO:0099092",  # postsynaptic density intracellular component       (DDID-biased)
+    "GO:0050804",  # modulation of chemical synaptic transmission       (DDID-biased)
+    "GO:0099560"   # synapse adhesion between pre- and post-synapse     (NoDDID only)
+)
+
+# Create df to label specific pathways
+df_scatter_labels <- bind_rows(
+    # Manuscript-cited pathways
+    df_scatter_syngo %>%
+        filter(id %in% highlight_ids),
+    # Top 2 per domain among pathways sig in BOTH ASD-D and ASD-DA vs siblings
+    df_scatter_syngo %>%
+        filter(sig_group %in% c("Both", "ASD-D only")) %>%
+        group_by(domain, sig_group) %>%
+        slice_min(p_fdr_asd_d, n = 2, with_ties = FALSE) %>%
+        ungroup()
+) %>%
+    distinct(id, .keep_all = TRUE) %>%
+    mutate(go_label = str_remove(name, "\\s*\\(GO:[0-9]+\\)\\s*$"))
+
+# Plot
+p_syngo_scatter <- df_scatter_syngo %>%
+    arrange(sig_group != "Neither") %>%
+    ggplot(aes(x = rel_rr_asd_da, y = rel_rr_asd_d, color = sig_group)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_point(aes(size = n_matched, fill = sig_group), alpha = 0.8, shape = 21, color = "white") +
+    ggrepel::geom_text_repel(
+        data = df_scatter_labels,
+        aes(label = str_wrap(go_label, width = 25)),
+        size = 1.8, max.overlaps = Inf,
+        min.segment.length = 0,
+        segment.color = "grey50", segment.size = 0.3,
+        box.padding = 1.5,
+        force = 6, force_pull = 0.5
+    ) +
+    scale_color_manual(values = col_sig_group, name = "Sig vs siblings", guide = "none") +
+    scale_fill_manual(values = col_sig_group, name = "Sig vs siblings") +
+    scale_size_continuous(range = c(1, 5), name = "# genes with \n≥1 mutation") +
+    scale_x_log10() +
+    scale_y_log10() +
+    guides(size = guide_legend(override.aes = aes(shape = 21, color = "black", fill = "grey60"))) +
+    facet_wrap(~ domain, ncol = 2) +
+    labs(
+        x     = "ASD-DA vs siblings (log RR)",
+        y     = "ASD-D vs siblings (log RR)",
+        title = "SynGO pathway relative enrichments"
+    ) +
+    theme(
+        legend.position  = "right",
+        strip.text       = element_text(size = 7, face = "bold"),
+        strip.background = element_blank(),
+        legend.text      = element_text(size = 5.5),
+        legend.title     = element_text(size = 6),
+        legend.margin    = margin(l = -5),
+        axis.text        = element_text(size = 5.5),
+        axis.title       = element_text(size = 6),
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold")
+    )
+
+
+p_syngo_scatter
+```
+
+## 3.2 GO scatter: ASD-DA vs siblings (x) × ASD-D vs siblings (y)
+
+```{r go_scatter, fig.width = 7.09, fig.height = 3}
+# Data prep
+df_scatter_go <- df_pairwise_go %>%
+    filter(comparison %in% c("asd_d_proband vs sibling", "asd_da_proband vs sibling")) %>%
+    select(id, name, domain, category, comparison,
+           rel_rr, ci_l, ci_h, n_matched, p_fdr) %>%
+    mutate(group = if_else(comparison == "asd_d_proband vs sibling", "asd_d", "asd_da")) %>%
+    select(-comparison) %>%
+    pivot_wider(
+        id_cols     = c(id, name, domain, category, n_matched),
+        names_from  = group,
+        values_from = c(rel_rr, ci_l, ci_h, p_fdr)
+    ) %>%
+    left_join(
+        df_pairwise_go %>%
+            filter(comparison == "asd_d_proband vs asd_da_proband") %>%
+            select(id, p_fdr_asd_d_asd_da = p_fdr, rel_rr_asd_d_asd_da = rel_rr),
+        by = "id"
+    ) %>%
+    mutate(
+        sig_asd_d_asd_da = replace_na(p_fdr_asd_d_asd_da < sig_thresh, FALSE),
+        sig_asd_d        = replace_na(p_fdr_asd_d   < sig_thresh, FALSE),
+        sig_asd_da      = replace_na(p_fdr_asd_da < sig_thresh, FALSE),
+        sig_group = case_when(
+            sig_asd_d  &  sig_asd_da ~ "Both",
+            sig_asd_d  & !sig_asd_da ~ "ASD-D only",
+            !sig_asd_d &  sig_asd_da ~ "ASD-DA only",
+            TRUE                    ~ "Neither"
+        ),
+        sig_group = factor(sig_group,
+                           levels = c("Both", "ASD-D only", "ASD-DA only", "Neither"))
+    )
+
+# Plot
+p_go_scatter <- df_scatter_go %>%
+    arrange(sig_group != "Neither") %>%
+    ggplot(aes(x = rel_rr_asd_da, y = rel_rr_asd_d, fill = sig_group)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_point(aes(size = n_matched), shape = 21, color = "white", stroke = 0.2, alpha = 0.7) +
+    ggrepel::geom_text_repel(
+        data = . %>% filter(sig_group == "ASD-DA only" & rel_rr_asd_da > 1),
+        aes(label = str_wrap(name, width = 25), color = sig_group),
+        size = 1.8, max.overlaps = 30,
+        nudge_x = 0.3, nudge_y = -0.3,
+        direction = "both",
+        min.segment.length = 0,
+        segment.color = "grey50", segment.size = 0.3,
+        box.padding = 0.4
+    ) +
+    scale_fill_manual(values = col_sig_group, name = "Sig vs siblings") +
+    scale_color_manual(values = col_sig_group, guide = "none") +
+    scale_size_continuous(range = c(0.5, 4), name = "# pathway genes",
+                          guide = guide_legend(
+                              override.aes = list(fill = "grey50", color = "white")
+                          )) +
+    scale_x_log10() +
+    scale_y_log10() +
+    facet_wrap(~ domain, nrow = 1) +
+    labs(
+        x     = "ASD-DA vs siblings (log RR)",
+        y     = "ASD-D vs siblings (log RR)",
+        title = "GO pathway relative enrichments"
+    ) +
+    theme(
+        plot.title = element_text(size = 7, hjust = 0.5, face = "bold"),
+        legend.position  = "none",
+        legend.box = "horizontal",
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_go_scatter
+```
+
+
+## 3.3 Combine panels
+
+```{r SynGO_GO_OE, fig.height = 6, fig.width = 7.09}
+p_syngo_ddid_combined <- p_syngo_scatter / free(p_go_scatter) +
+    plot_layout(heights = c(1, 1.25)) +
+    plot_annotation(tag_levels = "A") &
+    theme(plot.tag = element_text(face = "bold", size = 10))
+
+p_syngo_ddid_combined
+
+ggsave(
+    filename = file.path(figures_dir, "supplement", "06_01_SynGO-DDID-OE-enrichment.pdf"),
+    plot  = p_syngo_ddid_combined,
+    height    = 6,
+    width     = 7.09,
+    dpi       = 300
+)
+```
+
+
+
+# ------------------------------------------------------------------------------
+
+### 3.2.1 SynGO O/E forest plot — DDID and NoDDID cohorts
+
+Significant pathways only (FDR < 0.05 in at least one of DDID vs siblings or NoDDID vs
+siblings). Ordered by DDID O/E within each domain; colour encodes significance group
+from the scatter plot above.
+
+```{r plot_syngo_oe_forest, fig.height = 6.69, fig.width = 7.09}
+# Significant pathways in either DDID or NoDDID vs siblings
+sig_go_ids_syngo <- df_pairwise_syngo %>%
+    filter(
+        comparison %in% c("ddid_proband vs sibling", "noddid_proband vs sibling"),
+        p_fdr < sig_thresh
+    ) %>%
+    pull(go_id) %>%
+    unique()
+
+# Pathway order: DDID O/E descending within each domain
+forest_order_syngo <- df_oe_syngo %>%
+    filter(cohort == "ddid_proband", go_id %in% sig_go_ids_syngo) %>%
+    arrange(go_domain, desc(oe)) %>%
+    mutate(go_name_clean = str_remove(go_name, "\\s*\\(GO:[0-9]+\\)\\s*$")) %>%
+    pull(go_name_clean)
+
+# Join significance group; derive per-point colour
+df_oe_forest_syngo <- df_oe_syngo %>%
+    filter(
+        cohort %in% c("ddid_proband", "noddid_proband"),
+        go_id  %in% sig_go_ids_syngo
+    ) %>%
+    left_join(
+        df_scatter_syngo %>% select(go_id, sig_group),
+        by = "go_id"
+    ) %>%
+    mutate(
+        cohort_label = if_else(cohort == "ddid_proband", "DDID", "NoDDID"),
+        point_sig = case_when(
+            cohort_label == "DDID"   & sig_group %in% c("Both", "DDID only")   ~ "DDID",
+            cohort_label == "NoDDID" & sig_group %in% c("Both", "NoDDID only") ~ "NoDDID",
+            TRUE                                                                 ~ "ns"
+        ) %>% factor(levels = c("DDID", "NoDDID", "ns")),
+        go_name_clean = str_remove(go_name, "\\s*\\(GO:[0-9]+\\)\\s*$") %>% str_wrap(40),
+        go_name_clean = factor(go_name_clean, levels = rev(forest_order_syngo %>% str_wrap(40))),
+        sig_group     = factor(sig_group, levels = c("Both", "DDID only", "NoDDID only", "Neither"))
+    )
+
+col_point_sig <- c("DDID" = "#C0392B", "NoDDID" = "#4472C4", "ns" = "grey70")
+lab_point_sig <- c("DDID" = "DDID (FDR < 0.05)", "NoDDID" = "NoDDID (FDR < 0.05)", "ns" = "ns")
+
+# Extract shared legend from a dummy plot so it sits above all sub-plots
+legend_dummy <- ggplot(
+    tibble(x = 1, y = 1, point_sig = factor(names(col_point_sig), levels = names(col_point_sig))),
+    aes(x, y, color = point_sig)
+) +
+    geom_point() +
+    scale_color_manual(values = col_point_sig, labels = lab_point_sig,
+                       name = NULL, drop = FALSE) +
+    theme(legend.position = "top",
+          legend.key.size = unit(0.35, "cm"),
+          legend.text     = element_text(size = 6))
+
+shared_legend <- cowplot::get_legend(legend_dummy)
+
+# Helper: one sub-plot per sig_group row (no internal legend)
+make_forest_row <- function(df, grp, show_title = FALSE) {
+    ggplot(df, aes(x = oe, y = go_name_clean, color = point_sig)) +
+        geom_vline(xintercept = 1, linetype = "dashed",
+                   color = "grey50", linewidth = 0.4) +
+        geom_pointrange(
+            aes(xmin = ci_l, xmax = ci_h),
+            position = position_dodge(width = 0.6),
+            size = 0.25, linewidth = 0.4
+        ) +
+        scale_color_manual(values = col_point_sig, labels = lab_point_sig,
+                           name = NULL, drop = FALSE) +
+        facet_grid2(. ~ go_domain, independent = "all", scales = "free") +
+        labs(
+            x     = if (show_title) "O/E ratio" else NULL,
+            y     = NULL,
+            title = grp
+        ) +
+        theme(
+            legend.position  = "none",
+            axis.text.y      = element_text(size = 6),
+            axis.text.x      = element_text(size = 7),
+            axis.title.x     = element_text(size = 7),
+            plot.title       = element_text(size = 7, face = "bold", hjust = 0.5),
+            plot.margin      = margin(t = 1, r = 5, b = 1, l = 5),
+            strip.text       = element_text(face = "bold", size = 7),
+            strip.background = element_blank(),
+            panel.spacing    = unit(0.1, "lines")
+        )
+}
+
+sig_group_levels <- c("Both", "DDID only", "NoDDID only")
+
+n_paths_syngo <- df_oe_forest_syngo %>%
+    filter(sig_group %in% sig_group_levels) %>%
+    group_by(sig_group) %>%
+    summarise(n = n_distinct(go_name_clean), .groups = "drop") %>%
+    mutate(sig_group = factor(sig_group, levels = sig_group_levels)) %>%
+    arrange(sig_group)
+
+forest_rows_syngo <- map(sig_group_levels, function(grp) {
+    make_forest_row(
+        df         = df_oe_forest_syngo %>% filter(sig_group == grp),
+        grp        = grp,
+        show_title = grp == tail(sig_group_levels, 1)
+    )
+})
+
+p_syngo_oe_forest <- patchwork::wrap_plots(
+    c(list(patchwork::wrap_elements(shared_legend)), forest_rows_syngo),
+    ncol    = 1,
+    heights = c(0.8, n_paths_syngo$n)
+)
+
+p_syngo_oe_forest
+
+f_save_plot(
+    plot_obj  = p_syngo_oe_forest,
+    plot_name = "04a_syngo_OE_forest_sig.png",
+    overwrite = TRUE,
+    height    = 6.69,
+    width     = 7.09,
+    dpi       = 300
+)
+```
+
+### 3.2.2 SynGO DDID vs NoDDID O/E scatter
+
+Each point is a SynGO pathway; x = NoDDID O/E, y = DDID O/E. Colour and labels
+follow the same significance grouping as above.
+
+```{r plot_syngo_scatter_oe, fig.height = 4, fig.width = 9}
+df_scatter_oe_syngo <- df_oe_syngo %>%
+    filter(cohort %in% c("ddid_proband", "noddid_proband")) %>%
+    select(go_id, go_name, go_domain, n_matched, cohort, oe, ci_l, ci_h) %>%
+    mutate(cohort = if_else(cohort == "ddid_proband", "ddid", "noddid")) %>%
+    pivot_wider(
+        id_cols     = c(go_id, go_name, go_domain, n_matched),
+        names_from  = cohort,
+        values_from = c(oe, ci_l, ci_h)
+    ) %>%
+    left_join(
+        df_scatter_syngo %>% select(go_id, sig_group),
+        by = "go_id"
+    )
+
+p_syngo_scatter_oe <- df_scatter_oe_syngo %>%
+    arrange(sig_group != "Neither") %>%
+    ggplot(aes(x = oe_asd_da, y = oe_asd_d, color = sig_group)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+                color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_point(aes(size = n_matched), alpha = 0.8) +
+    ggrepel::geom_text_repel(
+        data = . %>% filter(sig_group == "NoDDID only"),
+        aes(label = str_wrap(str_remove(go_name, "\\s*\\(GO:[0-9]+\\)\\s*$"), width = 30)),
+        size = 2.2, max.overlaps = 25,
+        nudge_x = 0.3, nudge_y = -0.3,
+        direction = "both",
+        min.segment.length = 0,
+        segment.color = "grey50", segment.size = 0.3,
+        box.padding = 0.4
+    ) +
+    scale_color_manual(values = col_sig_group, name = "Sig vs siblings") +
+    scale_size_continuous(range = c(1, 5), name = "# pathway genes") +
+    scale_x_log10() +
+    scale_y_log10() +
+    facet_wrap(~ go_domain, ncol = 2) +
+    labs(
+        x     = "NoDDID O/E (log scale)",
+        y     = "DDID O/E (log scale)",
+        title = "SynGO DDID vs NoDDID O/E"
+    ) +
+    theme(
+        legend.position  = "right",
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_syngo_scatter_oe
+
+f_save_plot(
+    plot_obj  = p_syngo_scatter_oe,
+    plot_name = "04c_syngo_asd_d_asd_da_scatter_OE.png",
+    overwrite = TRUE,
+    height    = 4,
+    width     = 9,
+    dpi       = 300
+)
+```
+
+
+# --- 4) Table export --- #
+
+## 4.1 SynGO interim tables
+
+```{r export_syngo_tables}
+df_oe_syngo %>%
+    write_xlsx(file.path(notebook_out_dir, "06_02_syngo_OE_ratios.xlsx"))
+
+df_pairwise_syngo %>%
+    write_xlsx(file.path(notebook_out_dir, "06_02_syngo_cohort_pairwise.xlsx"))
+```
+
+## 4.2 GO interim tables
+
+```{r export_go_tables}
+df_oe_go %>%
+    write_xlsx(file.path(notebook_out_dir, "06_02_go_OE_ratios.xlsx"))
+
+df_pairwise_go %>%
+    write_xlsx(file.path(notebook_out_dir, "06_02_go_cohort_pairwise.xlsx"))
+```
+
+## 4.3 Manuscript tables
+
+```{r export_ms_tables}
+write_xlsx(
+    list(
+        "A. SynGO pathway OE ratios" = df_oe_syngo,
+        "B. SynGO pathway pairwise RRs" = df_pairwise_syngo
+    ),
+    path = file.path(notebook_out_dir, "06_02_all-SynGO-OE-ratios.xlsx")
+)
+
+write_xlsx(
+    list(
+        "A. GO pathway OE ratios (p < 0.05)" = df_oe_go %>% filter(p < 0.05),
+        "B. GO pathway pairwise RRs (p < 0.05)" = df_pairwise_go %>% arrange(p_fdr) %>% filter(p < 0.05)
+    ),
+    path = file.path(notebook_out_dir, "06_02_all-GO-OE-ratios.xlsx")
+)
+```
+
+# 3.3 DEPR
+
+## 3.3.1 SynGO O/E ratio per pathway per cohort
+
+```{r plot_syngo_oe, fig.height = 22, fig.width = 7}
+p_syngo_oe <- df_oe_syngo %>%
+    mutate(
+        go_name = factor(go_name, levels = rev(pathway_order_syngo)),
+        cohort  = factor(
+            cohort,
+            levels = c("ddid_proband", "noddid_proband", "proband", "sibling"),
+            labels = cohort_labels[c("ddid_proband", "noddid_proband", "proband", "sibling")]
+        )
+    ) %>%
+    ggplot(aes(x = oe, y = go_name, color = cohort)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h),
+        position = position_dodge(width = 0.7),
+        size = 0.2, linewidth = 0.3
+    ) +
+    scale_color_manual(values = setNames(col_cohort, cohort_labels[names(col_cohort)])) +
+    facet_grid(go_domain ~ ., scales = "free_y", space = "free_y") +
+    labs(
+        x     = "Observed / Expected",
+        y     = NULL,
+        color = NULL,
+        title = "SynGO pathway O/E ratio by cohort"
+    ) +
+    theme(
+        legend.position  = "top",
+        axis.text.y      = element_text(size = 5),
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_syngo_oe
+
+f_save_plot(
+    plot_obj  = p_syngo_oe,
+    plot_name = "05c_syngo_OE_ratio.pdf",
+    overwrite = TRUE,
+    height    = 22,
+    width     = 7,
+    dpi       = 300
+)
+```
+
+## 3.3.2 SynGO DDID vs NoDDID enrichment
+
+```{r plot_syngo_asd_d_asd_da, fig.height = 22, fig.width = 5}
+p_syngo_asd_d <- df_pairwise_syngo %>%
+    filter(comparison == "ddid_proband vs noddid_proband") %>%
+    mutate(
+        go_name = factor(go_name, levels = rev(pathway_order_syngo)),
+        sig     = p_fdr < sig_thresh,
+        sig_lab = case_when(
+            p_fdr < 0.001      ~ "***",
+            p_fdr < 0.01       ~ "**",
+            p_fdr < sig_thresh ~ "*",
+            TRUE               ~ ""
+        )
+    ) %>%
+    ggplot(aes(x = rel_rr, y = go_name)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h, color = sig),
+        size = 0.2, linewidth = 0.3
+    ) +
+    geom_text(
+        aes(x = ci_h, label = sig_lab),
+        hjust = -0.3, size = 2, color = "black"
+    ) +
+    scale_color_manual(
+        values = c("TRUE" = "#C0392B", "FALSE" = "grey60"),
+        guide  = NULL
+    ) +
+    facet_grid(go_domain ~ ., scales = "free_y", space = "free_y") +
+    labs(
+        x     = "Relative risk (DDID / NoDDID)",
+        y     = NULL,
+        title = "SynGO DDID vs NoDDID"
+    ) +
+    theme(
+        axis.text.y      = element_text(size = 5),
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_syngo_asd_d
+
+f_save_plot(
+    plot_obj  = p_syngo_asd_d,
+    plot_name = "05c_syngo_asd_d_vs_asd_da_RR.pdf",
+    overwrite = TRUE,
+    height    = 22,
+    width     = 5,
+    dpi       = 300
+)
+```
+
+## 3.3.3 SynGO DDID and NoDDID vs siblings
+
+```{r plot_syngo_vs_sib, fig.height = 22, fig.width = 6}
+pathway_order_sib_syngo <- df_pairwise_syngo %>%
+    filter(comparison == "ddid_proband vs sibling") %>%
+    arrange(go_domain, rel_rr) %>%
+    pull(go_name)
+
+p_syngo_vs_sib <- df_pairwise_syngo %>%
+    filter(comparison %in% c("ddid_proband vs sibling", "noddid_proband vs sibling")) %>%
+    mutate(
+        group      = if_else(comparison == "ddid_proband vs sibling", "DDID", "NoDDID"),
+        go_name    = factor(go_name, levels = pathway_order_sib_syngo),
+        color_group = case_when(
+            p_fdr < sig_thresh & group == "DDID"   ~ "DDID",
+            p_fdr < sig_thresh & group == "NoDDID" ~ "NoDDID",
+            TRUE                                    ~ "ns"
+        )
+    ) %>%
+    ggplot(aes(x = rel_rr, y = go_name, color = color_group)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h),
+        position = position_dodge(width = 0.6),
+        size = 0.2, linewidth = 0.3
+    ) +
+    scale_color_manual(
+        values = c("DDID" = "#C0392B", "NoDDID" = "#4472C4", "ns" = "grey70"),
+        labels = c("DDID" = "DDID (FDR < 0.05)", "NoDDID" = "NoDDID (FDR < 0.05)", "ns" = "ns"),
+        name   = NULL
+    ) +
+    facet_grid(go_domain ~ ., scales = "free_y", space = "free_y") +
+    coord_cartesian(xlim = c(NA, 30)) +
+    labs(
+        x     = "Relative risk vs siblings",
+        y     = NULL,
+        title = "SynGO proband enrichment vs siblings"
+    ) +
+    theme(
+        legend.position  = "top",
+        axis.text.y      = element_text(size = 5),
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_syngo_vs_sib
+
+f_save_plot(
+    plot_obj  = p_syngo_vs_sib,
+    plot_name = "05c_syngo_asd_d_asd_da_vs_sibling_RR.pdf",
+    overwrite = TRUE,
+    height    = 22,
+    width     = 6,
+    dpi       = 300
+)
+```
+
+## 3.3.4 SynGO total mutations vs DDID:NoDDID relative risk
+
+```{r plot_syngo_bubble, fig.height = 2.5, fig.width = 7}
+# Total observed de novo mutations across DDID + NoDDID probands per pathway
+df_total_mut <- df_oe_syngo %>%
+    filter(cohort %in% c("ddid_proband", "noddid_proband")) %>%
+    group_by(go_id) %>%
+    summarise(total_obs = sum(obs, na.rm = TRUE), .groups = "drop")
+
+df_ms_syngo_bubble <- df_scatter_syngo %>%
+    left_join(df_total_mut, by = "go_id") %>%
+    mutate(go_label = str_remove(go_name, "\\s*\\(GO:[0-9]+\\)\\s*$")) %>%
+    arrange(sig_group == "Neither")   # sig points on top
+
+col_sig_group_depr <- c(
+    "Both"       = "#2E7D32",
+    "DDID only"  = "#C0392B",
+    "NoDDID only"= "#4472C4",
+    "Neither"    = "grey75"
+)
+
+p_ms_syngo_bubble <- df_ms_syngo_bubble %>%
+    ggplot(aes(x = total_obs, y = rel_rr_asd_d_asd_da, color = sig_group)) +
+    geom_hline(yintercept = 1, linetype = "dashed",
+               color = "grey50", linewidth = 0.4) +
+    geom_point(aes(size = n_matched), alpha = 0.85) +
+    ggrepel::geom_text_repel(
+        data = . %>% filter(sig_group != "Neither"),
+        aes(label = str_wrap(go_label, 25)),
+        size = 2, max.overlaps = Inf,
+        box.padding = 0.4, point.padding = 0.3,
+        min.segment.length = 0,
+        segment.color = "grey50", segment.size = 0.3,
+        show.legend = FALSE
+    ) +
+    scale_color_manual(values = col_sig_group_depr, name = "Sig vs siblings") +
+    scale_size_continuous(range = c(1, 5), name = "# pathway genes") +
+    scale_y_log10() +
+    facet_wrap(~ go_domain, ncol = 2) +
+    labs(
+        x     = "Total de novo mutations (DDID + NoDDID probands)",
+        y     = "DDID:NoDDID relative risk (log scale)",
+        title = "SynGO DDID vs NoDDID enrichment"
+    ) +
+    theme(
+        legend.position  = "right",
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_ms_syngo_bubble
+
+f_save_plot(
+    plot_obj  = p_ms_syngo_bubble,
+    plot_name = "ms_syngo-bubble.pdf",
+    overwrite = TRUE,
+    height    = 2.5,
+    width     = 7,
+    dpi       = 300
+)
+```
+
+## 3.3.5 GO O/E ratio per pathway per cohort
+
+Forest plots are restricted to FDR-significant pathways in at least one cohort;
+the full results are in the exported table.
+
+```{r plot_go_oe, fig.height = 14, fig.width = 7}
+df_oe_go_sig <- df_oe_go %>%
+    group_by(go_id) %>%
+    filter(any(p_fdr < sig_thresh)) %>%
+    ungroup()
+
+p_go_oe <- df_oe_go_sig %>%
+    mutate(
+        go_name = factor(go_name, levels = rev(pathway_order_go)),
+        cohort  = factor(
+            cohort,
+            levels = c("ddid_proband", "noddid_proband", "proband", "sibling"),
+            labels = cohort_labels[c("ddid_proband", "noddid_proband", "proband", "sibling")]
+        )
+    ) %>%
+    ggplot(aes(x = oe, y = go_name, color = cohort)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h),
+        position = position_dodge(width = 0.7),
+        size = 0.2, linewidth = 0.3
+    ) +
+    scale_color_manual(values = setNames(col_cohort, cohort_labels[names(col_cohort)])) +
+    facet_grid(go_domain ~ ., scales = "free_y", space = "free_y") +
+    labs(
+        x     = "Observed / Expected",
+        y     = NULL,
+        color = NULL,
+        title = "GO pathway O/E ratio by cohort (FDR < 0.05 in ≥ 1 cohort)"
+    ) +
+    theme(
+        legend.position  = "top",
+        axis.text.y      = element_text(size = 5),
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_go_oe
+
+f_save_plot(
+    plot_obj  = p_go_oe,
+    plot_name = "04d_go_OE_ratio.pdf",
+    overwrite = TRUE,
+    height    = 14,
+    width     = 7,
+    dpi       = 300
+)
+```
+
+## 3.3.6 GO DDID vs NoDDID enrichment
+
+```{r plot_go_asd_d_asd_da, fig.height = 14, fig.width = 5}
+df_pairwise_go_asd_d_sig <- df_pairwise_go %>%
+    filter(comparison == "ddid_proband vs noddid_proband", p_fdr < sig_thresh)
+
+pathway_order_go_asd_d <- df_pairwise_go %>%
+    filter(comparison == "ddid_proband vs noddid_proband",
+           go_id %in% df_pairwise_go_asd_d_sig$go_id) %>%
+    arrange(go_domain, rel_rr) %>%
+    pull(go_name)
+
+p_go_asd_d <- df_pairwise_go %>%
+    filter(comparison == "ddid_proband vs noddid_proband",
+           go_id %in% df_pairwise_go_asd_d_sig$go_id) %>%
+    mutate(
+        go_name = factor(go_name, levels = pathway_order_go_asd_d),
+        sig_lab = case_when(
+            p_fdr < 0.001      ~ "***",
+            p_fdr < 0.01       ~ "**",
+            p_fdr < sig_thresh ~ "*",
+            TRUE               ~ ""
+        ),
+        sig = p_fdr < sig_thresh
+    ) %>%
+    ggplot(aes(x = rel_rr, y = go_name)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h, color = sig),
+        size = 0.2, linewidth = 0.3
+    ) +
+    geom_text(
+        aes(x = ci_h, label = sig_lab),
+        hjust = -0.3, size = 2, color = "black"
+    ) +
+    scale_color_manual(
+        values = c("TRUE" = "#C0392B", "FALSE" = "grey60"),
+        guide  = NULL
+    ) +
+    facet_grid(go_domain ~ ., scales = "free_y", space = "free_y") +
+    labs(
+        x     = "Relative risk (DDID / NoDDID)",
+        y     = NULL,
+        title = "GO DDID vs NoDDID (FDR < 0.05)"
+    ) +
+    theme(
+        axis.text.y      = element_text(size = 5),
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_go_asd_d
+
+f_save_plot(
+    plot_obj  = p_go_asd_d,
+    plot_name = "04d_go_asd_d_vs_asd_da_RR.pdf",
+    overwrite = TRUE,
+    height    = 14,
+    width     = 5,
+    dpi       = 300
+)
+```
+
+## 3.3.7 GO DDID and NoDDID vs siblings
+
+```{r plot_go_vs_sib, fig.height = 14, fig.width = 6}
+df_pairwise_go_sib_sig <- df_pairwise_go %>%
+    filter(comparison %in% c("ddid_proband vs sibling", "noddid_proband vs sibling"),
+           p_fdr < sig_thresh)
+
+pathway_order_go_sib <- df_pairwise_go %>%
+    filter(comparison == "ddid_proband vs sibling",
+           go_id %in% df_pairwise_go_sib_sig$go_id) %>%
+    arrange(go_domain, rel_rr) %>%
+    pull(go_name)
+
+p_go_vs_sib <- df_pairwise_go %>%
+    filter(comparison %in% c("ddid_proband vs sibling", "noddid_proband vs sibling"),
+           go_id %in% df_pairwise_go_sib_sig$go_id) %>%
+    mutate(
+        group       = if_else(comparison == "ddid_proband vs sibling", "DDID", "NoDDID"),
+        go_name     = factor(go_name, levels = pathway_order_go_sib),
+        color_group = case_when(
+            p_fdr < sig_thresh & group == "DDID"   ~ "DDID",
+            p_fdr < sig_thresh & group == "NoDDID" ~ "NoDDID",
+            TRUE                                    ~ "ns"
+        )
+    ) %>%
+    ggplot(aes(x = rel_rr, y = go_name, color = color_group)) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_pointrange(
+        aes(xmin = ci_l, xmax = ci_h),
+        position = position_dodge(width = 0.6),
+        size = 0.2, linewidth = 0.3
+    ) +
+    scale_color_manual(
+        values = c("DDID" = "#C0392B", "NoDDID" = "#4472C4", "ns" = "grey70"),
+        labels = c("DDID" = "DDID (FDR < 0.05)", "NoDDID" = "NoDDID (FDR < 0.05)", "ns" = "ns"),
+        name   = NULL
+    ) +
+    facet_grid(go_domain ~ ., scales = "free_y", space = "free_y") +
+    coord_cartesian(xlim = c(NA, 30)) +
+    labs(
+        x     = "Relative risk vs siblings",
+        y     = NULL,
+        title = "GO proband enrichment vs siblings (FDR < 0.05)"
+    ) +
+    theme(
+        legend.position  = "top",
+        axis.text.y      = element_text(size = 5),
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_go_vs_sib
+
+f_save_plot(
+    plot_obj  = p_go_vs_sib,
+    plot_name = "04d_go_asd_d_asd_da_vs_sibling_RR.pdf",
+    overwrite = TRUE,
+    height    = 14,
+    width     = 6,
+    dpi       = 300
+)
+```
+
+## 3.3.8 GO DDID vs NoDDID scatter (each vs siblings)
+
+Each point is a GO pathway; x = NoDDID vs sibling RR, y = DDID vs sibling RR.
+Points are coloured by significance group; only NoDDID-only significant pathways are labelled.
+
+```{r plot_go_scatter, fig.height = 4, fig.width = 12}
+df_scatter_go <- df_pairwise_go %>%
+    filter(comparison %in% c("ddid_proband vs sibling", "noddid_proband vs sibling")) %>%
+    select(go_id, go_name, go_domain, category, comparison,
+           rel_rr, ci_l, ci_h, n_matched, p_fdr) %>%
+    mutate(group = if_else(comparison == "ddid_proband vs sibling", "ddid", "noddid")) %>%
+    select(-comparison) %>%
+    pivot_wider(
+        id_cols     = c(go_id, go_name, go_domain, category, n_matched),
+        names_from  = group,
+        values_from = c(rel_rr, ci_l, ci_h, p_fdr)
+    ) %>%
+    left_join(
+        df_pairwise_go %>%
+            filter(comparison == "ddid_proband vs noddid_proband") %>%
+            select(go_id, p_fdr_asd_d_asd_da = p_fdr, rel_rr_asd_d_asd_da = rel_rr),
+        by = "go_id"
+    ) %>%
+    mutate(
+        sig_asd_d_asd_da = replace_na(p_fdr_asd_d_asd_da < sig_thresh, FALSE),
+        sig_asd_d        = replace_na(p_fdr_asd_d   < sig_thresh, FALSE),
+        sig_asd_da      = replace_na(p_fdr_asd_da < sig_thresh, FALSE),
+        sig_group = case_when(
+            sig_asd_d  &  sig_asd_da ~ "Both",
+            sig_asd_d  & !sig_asd_da ~ "DDID only",
+            !sig_asd_d &  sig_asd_da ~ "NoDDID only",
+            TRUE                    ~ "Neither"
+        ),
+        sig_group = factor(sig_group,
+                           levels = c("Both", "DDID only", "NoDDID only", "Neither"))
+    )
+
+p_go_scatter <- df_scatter_go %>%
+    arrange(sig_group != "Neither") %>%
+    ggplot(aes(x = rel_rr_asd_da, y = rel_rr_asd_d, color = sig_group)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_point(aes(size = n_matched), alpha = 0.7) +
+    ggrepel::geom_text_repel(
+        data = . %>% filter(sig_group == "NoDDID only" & rel_rr_asd_da > 1),
+        aes(label = str_wrap(go_name, width = 25)),
+        size = 2.2, max.overlaps = 30,
+        nudge_x = 0.3, nudge_y = -0.3,
+        direction = "both",
+        min.segment.length = 0,
+        segment.color = "grey50", segment.size = 0.3,
+        box.padding = 0.4
+    ) +
+    scale_color_manual(values = col_sig_group, name = "Sig vs siblings") +
+    scale_size_continuous(range = c(0.5, 4), name = "# pathway genes") +
+    scale_x_log10() +
+    scale_y_log10() +
+    facet_wrap(~ go_domain, ncol = 3) +
+    labs(
+        x     = "NoDDID vs siblings (log RR)",
+        y     = "DDID vs siblings (log RR)",
+        title = "GO DDID vs NoDDID enrichment relative to siblings"
+    ) +
+    theme(
+        legend.position  = "right",
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_go_scatter
+
+f_save_plot(
+    plot_obj  = p_go_scatter,
+    plot_name = "04d_go_asd_d_asd_da_scatter.png",
+    overwrite = TRUE,
+    height    = 4,
+    width     = 12,
+    dpi       = 300
+)
+```
+
+## 3.3.9 GO DDID vs NoDDID O/E scatter
+
+Each point is a GO pathway; x = NoDDID O/E, y = DDID O/E. Colour and labels
+follow the same significance grouping as above.
+
+```{r plot_go_scatter_oe, fig.height = 4, fig.width = 12}
+df_scatter_oe_go <- df_oe_go %>%
+    filter(cohort %in% c("ddid_proband", "noddid_proband")) %>%
+    select(go_id, go_name, go_domain, n_matched, cohort, oe, ci_l, ci_h) %>%
+    mutate(cohort = if_else(cohort == "ddid_proband", "ddid", "noddid")) %>%
+    pivot_wider(
+        id_cols     = c(go_id, go_name, go_domain, n_matched),
+        names_from  = cohort,
+        values_from = c(oe, ci_l, ci_h)
+    ) %>%
+    left_join(
+        df_scatter_go %>% select(go_id, sig_group),
+        by = "go_id"
+    )
+
+p_go_scatter_oe <- df_scatter_oe_go %>%
+    arrange(sig_group != "Neither") %>%
+    ggplot(aes(x = oe_asd_da, y = oe_asd_d, color = sig_group)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+                color = "grey50", linewidth = 0.4) +
+    geom_vline(xintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_hline(yintercept = 1, linetype = "dotted", color = "grey70", linewidth = 0.3) +
+    geom_point(aes(size = n_matched), alpha = 0.7) +
+    ggrepel::geom_text_repel(
+        data = . %>% filter(sig_group == "NoDDID only"),
+        aes(label = str_wrap(go_name, width = 25)),
+        size = 2.2, max.overlaps = 30,
+        nudge_x = 0.3, nudge_y = -0.3,
+        direction = "both",
+        min.segment.length = 0,
+        segment.color = "grey50", segment.size = 0.3,
+        box.padding = 0.4
+    ) +
+    scale_color_manual(values = col_sig_group, name = "Sig vs siblings") +
+    scale_size_continuous(range = c(0.5, 4), name = "# pathway genes") +
+    scale_x_log10() +
+    scale_y_log10() +
+    facet_wrap(~ go_domain, ncol = 3) +
+    labs(
+        x     = "NoDDID O/E (log scale)",
+        y     = "DDID O/E (log scale)",
+        title = "GO DDID vs NoDDID O/E"
+    ) +
+    theme(
+        legend.position  = "right",
+        strip.text       = element_text(face = "bold"),
+        strip.background = element_blank()
+    )
+
+p_go_scatter_oe
+
+f_save_plot(
+    plot_obj  = p_go_scatter_oe,
+    plot_name = "04d_go_asd_d_asd_da_scatter_OE.pdf",
+    overwrite = TRUE,
+    height    = 7,
+    width     = 12,
+    dpi       = 300
+)
+```
+
+## 3.3.10 GO O/E forest plot — significant pathways (top by p-value)
+
+Significant pathways only (FDR < 0.05 in at least one of DDID vs siblings or NoDDID vs
+siblings). Ordered by DDID O/E within each domain; patchwork stacks sig-group rows with
+heights proportional to pathway count. Shared legend sits above all rows.
+
+```{r plot_go_oe_forest, fig.height = 8, fig.width = 6}
+sig_go_ids_all <- df_pairwise_go %>%
+    filter(
+        comparison %in% c("ddid_proband vs sibling", "noddid_proband vs sibling"),
+        p_fdr < sig_thresh
+    ) %>%
+    pull(go_id) %>%
+    unique()
+
+# "Both": top 5 per ontology by min(p_fdr_asd_d, p_fdr_asd_da)
+top5_both_ids <- df_oe_go %>%
+    filter(cohort %in% c("ddid_proband", "noddid_proband"),
+           go_id %in% sig_go_ids_all) %>%
+    select(go_id, go_domain, cohort, p_fdr) %>%
+    left_join(df_scatter_go %>% select(go_id, sig_group), by = "go_id") %>%
+    filter(sig_group == "Both") %>%
+    pivot_wider(id_cols = c(go_id, go_domain),
+                names_from  = cohort,
+                values_from = p_fdr,
+                names_prefix = "p_fdr_") %>%
+    mutate(min_p_fdr = pmin(p_fdr_asd_d_proband, p_fdr_asd_da_proband, na.rm = TRUE)) %>%
+    group_by(go_domain) %>%
+    slice_min(min_p_fdr, n = 5, with_ties = FALSE) %>%
+    ungroup() %>%
+    pull(go_id)
+
+# "DDID only": top 5 per ontology by DDID p_fdr
+top5_asd_d_only_ids <- df_oe_go %>%
+    filter(cohort == "ddid_proband", go_id %in% sig_go_ids_all) %>%
+    left_join(df_scatter_go %>% select(go_id, sig_group), by = "go_id") %>%
+    filter(sig_group == "DDID only") %>%
+    group_by(go_domain) %>%
+    slice_min(p_fdr, n = 5, with_ties = FALSE) %>%
+    ungroup() %>%
+    pull(go_id)
+
+# "NoDDID only": keep all
+noddid_only_ids <- df_scatter_go %>%
+    filter(sig_group == "NoDDID only", go_id %in% sig_go_ids_all) %>%
+    pull(go_id)
+
+sig_go_ids_go <- unique(c(top5_both_ids, top5_asd_d_only_ids, noddid_only_ids))
+
+# Pathway order: DDID O/E descending within each domain
+forest_order_go <- df_oe_go %>%
+    filter(cohort == "ddid_proband", go_id %in% sig_go_ids_go) %>%
+    arrange(go_domain, desc(oe)) %>%
+    pull(go_name)
+
+df_oe_forest_go <- df_oe_go %>%
+    filter(
+        cohort %in% c("ddid_proband", "noddid_proband"),
+        go_id  %in% sig_go_ids_go
+    ) %>%
+    left_join(
+        df_scatter_go %>% select(go_id, sig_group),
+        by = "go_id"
+    ) %>%
+    mutate(
+        cohort_label = if_else(cohort == "ddid_proband", "DDID", "NoDDID"),
+        point_sig = case_when(
+            cohort_label == "DDID"   & sig_group %in% c("Both", "DDID only")   ~ "DDID",
+            cohort_label == "NoDDID" & sig_group %in% c("Both", "NoDDID only") ~ "NoDDID",
+            TRUE                                                                 ~ "ns"
+        ) %>% factor(levels = c("DDID", "NoDDID", "ns")),
+        go_name_clean = str_wrap(go_name, width = 30),
+        go_name_clean = factor(go_name_clean,
+                               levels = rev(str_wrap(forest_order_go, width = 30))),
+        sig_group     = factor(sig_group,
+                               levels = c("Both", "DDID only", "NoDDID only", "Neither"))
+    )
+
+# Shared legend extracted from a dummy plot with all levels guaranteed
+legend_dummy_go <- ggplot(
+    tibble(x = 1, y = 1,
+           point_sig = factor(names(col_point_sig), levels = names(col_point_sig))),
+    aes(x, y, color = point_sig)
+) +
+    geom_point() +
+    scale_color_manual(values = col_point_sig, labels = lab_point_sig,
+                       name = NULL, drop = FALSE) +
+    theme(legend.position = "top",
+          legend.key.size = unit(0.35, "cm"),
+          legend.text     = element_text(size = 6))
+
+shared_legend_go <- cowplot::get_legend(legend_dummy_go)
+
+# Helper: one sub-plot per sig_group (faceted by go_domain)
+make_forest_row_go <- function(df, grp, show_title = FALSE) {
+    ggplot(df, aes(x = oe, y = go_name_clean, color = point_sig)) +
+        geom_vline(xintercept = 1, linetype = "dashed",
+                   color = "grey50", linewidth = 0.4) +
+        geom_pointrange(
+            aes(xmin = ci_l, xmax = ci_h),
+            position = position_dodge(width = 0.6),
+            size = 0.25, linewidth = 0.4
+        ) +
+        scale_color_manual(values = col_point_sig, labels = lab_point_sig,
+                           name = NULL, drop = FALSE) +
+        facet_grid2(. ~ go_domain, independent = "all", scales = "free") +
+        labs(
+            x     = if (show_title) "Observed / expected" else NULL,
+            y     = NULL,
+            title = grp
+        ) +
+        theme(
+            legend.position  = "none",
+            axis.text.y      = element_text(size = 7),
+            axis.text.x      = element_text(size = 7),
+            axis.title.x     = element_text(size = 7),
+            plot.title       = element_text(size = 7, face = "bold", hjust = 0.5),
+            plot.margin      = margin(t = 1, r = 5, b = 1, l = 5),
+            strip.text       = element_text(face = "bold", size = 7),
+            strip.background = element_blank(),
+            panel.spacing    = unit(0.1, "lines")
+        )
+}
+
+n_paths_go <- df_oe_forest_go %>%
+    filter(sig_group %in% sig_group_levels) %>%
+    group_by(sig_group) %>%
+    summarise(n = n_distinct(go_name_clean), .groups = "drop") %>%
+    mutate(sig_group = factor(sig_group, levels = sig_group_levels)) %>%
+    arrange(sig_group)
+
+forest_rows_go <- map(sig_group_levels, function(grp) {
+    make_forest_row_go(
+        df         = df_oe_forest_go %>% filter(sig_group == grp),
+        grp        = grp,
+        show_title = grp == tail(sig_group_levels, 1)
+    )
+})
+
+p_go_oe_forest <- patchwork::wrap_plots(
+    c(list(patchwork::wrap_elements(shared_legend_go)), forest_rows_go),
+    ncol    = 1,
+    heights = c(0.8, n_paths_go$n)
+) +
+    patchwork::plot_annotation(title = "GO O/E — significant pathways")
+
+p_go_oe_forest
+
+f_save_plot(
+    plot_obj  = p_go_oe_forest,
+    plot_name = "04d_go_OE_forest_sig.png",
+    overwrite = TRUE,
+    height    = 8,
+    width     = 6,
+    dpi       = 300
+)
+```
+
+## 3.3.11 GO O/E forest plot — top DDID RR vs siblings
+
+Same layout as above but "Both" and "DDID only" rows are limited to the top 5 pathways
+per ontology by highest DDID vs siblings relative risk (rather than lowest p-value).
+
+```{r plot_go_oe_forest_rr, fig.height = 8, fig.width = 6}
+top5_rr_ids <- df_pairwise_go %>%
+    filter(comparison == "ddid_proband vs sibling", go_id %in% sig_go_ids_all) %>%
+    left_join(df_scatter_go %>% select(go_id, sig_group), by = "go_id") %>%
+    filter(sig_group %in% c("Both", "DDID only")) %>%
+    group_by(go_domain, sig_group) %>%
+    slice_max(rel_rr, n = 5, with_ties = FALSE) %>%
+    ungroup() %>%
+    pull(go_id)
+
+sig_go_ids_rr <- unique(c(top5_rr_ids, noddid_only_ids))
+
+forest_order_go_rr <- df_oe_go %>%
+    filter(cohort == "ddid_proband", go_id %in% sig_go_ids_rr) %>%
+    arrange(go_domain, desc(oe)) %>%
+    pull(go_name)
+
+df_oe_forest_go_rr <- df_oe_go %>%
+    filter(
+        cohort %in% c("ddid_proband", "noddid_proband"),
+        go_id  %in% sig_go_ids_rr
+    ) %>%
+    left_join(
+        df_scatter_go %>% select(go_id, sig_group),
+        by = "go_id"
+    ) %>%
+    mutate(
+        cohort_label = if_else(cohort == "ddid_proband", "DDID", "NoDDID"),
+        point_sig = case_when(
+            cohort_label == "DDID"   & sig_group %in% c("Both", "DDID only")   ~ "DDID",
+            cohort_label == "NoDDID" & sig_group %in% c("Both", "NoDDID only") ~ "NoDDID",
+            TRUE                                                                 ~ "ns"
+        ) %>% factor(levels = c("DDID", "NoDDID", "ns")),
+        go_name_clean = str_wrap(go_name, width = 30),
+        go_name_clean = factor(go_name_clean,
+                               levels = rev(str_wrap(forest_order_go_rr, width = 30))),
+        sig_group     = factor(sig_group,
+                               levels = c("Both", "DDID only", "NoDDID only", "Neither"))
+    )
+
+n_paths_go_rr <- df_oe_forest_go_rr %>%
+    filter(sig_group %in% sig_group_levels) %>%
+    group_by(sig_group) %>%
+    summarise(n = n_distinct(go_name_clean), .groups = "drop") %>%
+    mutate(sig_group = factor(sig_group, levels = sig_group_levels)) %>%
+    arrange(sig_group)
+
+forest_rows_go_rr <- map(sig_group_levels, function(grp) {
+    make_forest_row_go(
+        df         = df_oe_forest_go_rr %>% filter(sig_group == grp),
+        grp        = grp,
+        show_title = grp == tail(sig_group_levels, 1)
+    )
+})
+
+p_go_oe_forest_rr <- patchwork::wrap_plots(
+    c(list(patchwork::wrap_elements(shared_legend_go)), forest_rows_go_rr),
+    ncol    = 1,
+    heights = c(0.8, n_paths_go_rr$n)
+) +
+    patchwork::plot_annotation(title = "GO O/E — top DDID RR vs siblings")
+
+p_go_oe_forest_rr
+
+f_save_plot(
+    plot_obj  = p_go_oe_forest_rr,
+    plot_name = "04d_go_OE_forest_top_RR.png",
+    overwrite = TRUE,
+    height    = 10,
+    width     = 10,
+    dpi       = 300
+)
+```

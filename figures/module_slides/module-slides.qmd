@@ -1,0 +1,728 @@
+---
+title: "Module slides"
+description: "One summary slide per significant ASD module: GO similarity graph of ASD genes, cortical spatial enrichment map, BrainSpan developmental trajectory, GO & SynGO enrichments, and (for co-expression modules) top kME hubs"
+date: 2026-08-10
+format: html
+---
+
+Each of the 28 stepwise-significant modules gets one 10 x 7.5 in landscape slide, all
+written to a single multi-page PDF in alphabetical order by module label. Panel sources:
+
+- GO similarity graph: networks saved by 05_03 (`05_03_all-module-GO-similarity-graphs.RDS`)
+- Brain spatial map: recomputed here in a python chunk (code from 03_05), title-free
+- Developmental trajectory: per-module BrainSpan code from TRY_module-dev-plots, cached here
+- GO enrichments: `02_00_sig-mod-GO-enrichments.RDS`
+- SynGO enrichments: term-level ORA from 05_02 section 2, run here on all modules (cached)
+- Hub genes: top 10 by kME for GandalIsoforms/Wen co-expression modules, ASD genes bolded
+
+
+# --- 0) Setup --- #
+
+## 0.1 R environment and data
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Source setup script
+project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+source(paste0(project_dir, "code/setup.R"))
+
+# Slide output directory (brain maps are written into a subdirectory by the python chunk)
+slides_dir    <- file.path(figures_dir, "module_slides")
+brain_map_dir <- file.path(slides_dir, "AHBA_spatial_maps")
+#walk(c(slides_dir, brain_map_dir), dir.create, recursive = TRUE, showWarnings = FALSE)
+
+# Cached-computation paths: the SynGO ORA and BrainSpan trajectories are computed on the
+# first render and reused afterwards; delete a file to force recomputation
+syngo_cache_path <- file.path(analysis_dir, "05_MORPH_annotation",
+                              "module-slides_all-module-SynGO-ORA.RDS")
+traj_cache_path  <- file.path(analysis_dir, "02_module_enrichments",
+                              "module-slides_brainspan-module-traj.RDS")
+brain_enr_dir    <- file.path(analysis_dir, "03_brain_spatial_enrichment",
+                              "module-slides_enrichment")
+```
+
+```{r load_study_data}
+# ASD rare variant statistics
+df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
+
+# Gene → module/transcript assignments across studies
+df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
+
+# Significant ASD modules (28) with association statistics
+df_stepwise_res <- readRDS(
+    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+)$lm_results %>%
+    mutate(module = as.character(module))
+
+# Consensus GO topic per module (from 02_00)
+df_topic_consensus <- readRDS(
+    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+)$consensus %>%
+    dplyr::select(module, topic = consensus_topic)
+
+# Gene-topic assignments (from notebook 02_02)
+df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+
+# Module membership (kME) for the co-expression studies
+df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
+
+# GO enrichments for all significant modules (from 02_00)
+df_go_res <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_sig-mod-GO-enrichments.RDS")) %>%
+    mutate(module = as.character(module))
+
+# GO cosine-similarity networks per module (from 05_03; avoids re-querying org.Hs.eg.db)
+all_module_nets <- readRDS(
+    file.path(analysis_dir, "05_MORPH_annotation", "05_03_all-module-GO-similarity-graphs.RDS")
+)
+
+# SynGO ontology
+syngo_dir <- file.path(data_dir, "SynGO")
+df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
+```
+
+## 0.2 Module metadata and slide order
+
+```{r module_metadata}
+# One long table of module membership, used for gene lists, sizes, and SynGO backgrounds
+df_network_unnest <- df_network_data %>%
+    unnest(cols = c(data))
+
+# Significant-module gene lists, rebuilt from the network RDS rather than read from
+# 01_00_sig-module-genes.csv: that CSV is Excel-corrupted (40 gene symbols converted to
+# dates, e.g. MARCH4 -> "4-Mar"), and corrupted symbols silently drop out of the AHBA
+# matching. A clean copy is exported below for the python brain-map chunk.
+df_sig_module_genes <- df_network_unnest %>%
+    filter(module %in% df_stepwise_res$module) %>%
+    distinct(module, module_label, study, gene_name) %>%
+    left_join(df_topic_consensus, by = "module")
+
+sig_module_genes_path <- file.path(analysis_dir, "01_module_identification",
+                                   "module-slides_sig-module-genes.csv")
+write_csv(df_sig_module_genes, sig_module_genes_path)
+
+# Transcript counts are only meaningful for isoform-level modules; showing them whenever
+# a module maps to more transcripts than genes avoids hardcoding which studies are
+# isoform-level
+df_module_sizes <- df_network_unnest %>%
+    filter(module %in% df_sig_module_genes$module) %>%
+    group_by(module) %>%
+    summarise(
+        n_genes       = n_distinct(gene_name),
+        n_transcripts = n_distinct(ensembl_transcript_id[!is.na(ensembl_transcript_id)]),
+        .groups = "drop"
+    )
+
+df_module_meta <- df_sig_module_genes %>%
+    distinct(module, module_label, topic, study) %>%
+    left_join(df_module_sizes, by = "module") %>%
+    left_join(df_stepwise_res %>% dplyr::select(module, beta_std, p_adj), by = "module") %>%
+    # hub gene / TF symbol, taken from the module label (e.g. "MEF2C (+)" -> MEF2C)
+    mutate(hub_gene = str_remove(module_label, "\\ .*")) %>%
+    arrange(module_label)
+
+# Slide order: alphabetical by module label
+module_order <- df_module_meta %>% pull(module)
+
+# Filename-safe module label, matching the python chunk's re.sub() exactly so the R side
+# finds the maps the python side writes
+safe_label <- function(x) {
+    str_replace_all(x, "[^A-Za-z0-9]+", "_") %>% str_remove("^_") %>% str_remove("_$")
+}
+
+# ASD risk genes (TADA FDR < 0.001, non-flagged), used for hub bolding and the GO graphs
+asd_risk_genes <- df_asd_rarevar_zscore %>%
+    filter(FDR < 0.001 & !FLAG) %>%
+    pull(gene_name) %>%
+    unique()
+```
+
+
+# --- 1) Brain spatial maps (python, spin conda env) --- #
+
+The per-module cortical enrichment maps from 03_05, recomputed here so the slides get
+title-free panels that keep the colorbar (the slide header already names the module).
+The expensive step — 10,000
+size-matched resamples per module — is cached as one CSV per module under
+`outputs/analysis/03_brain_spatial_enrichment/module-slides_enrichment/`, so re-renders
+only redraw the surfaces. Delete a module's CSV to force a fresh enrichment; delete its
+PNG to force a redraw. Set `sh.DENSITY = "fsaverage5"` below for fast drafts.
+
+```{r python_env}
+# The 03_* spatial stack lives in the `spin` conda env; if reticulate cannot find it,
+# run `conda env list` to check the name, or set eval: false here and in the next chunk
+# to fall back to previously generated PNGs
+library(reticulate)
+use_condaenv("spin", required = TRUE)
+```
+
+```{python brain_maps}
+import os, re, sys
+import numpy as np, pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+
+PROJ = os.path.expanduser("~/Documents/Postdoc/projects/ASD-rarevar-annot")
+sys.path.insert(0, f"{PROJ}/code/analysis/03_brain_spatial_enrichment")
+import spatial_helpers as sh
+
+MAP_DIR = f"{PROJ}/outputs/figures/module_slides/AHBA_spatial_maps"
+ENR_DIR = f"{PROJ}/outputs/analysis/03_brain_spatial_enrichment/module-slides_enrichment"
+for d in (MAP_DIR, ENR_DIR):
+    os.makedirs(d, exist_ok=True)
+
+safe = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s).strip("_")
+
+# Clean gene-list export written by the R setup chunk (NOT the Excel-corrupted 01_00 CSV)
+mods = pd.read_csv(f"{PROJ}/outputs/analysis/01_module_identification/module-slides_sig-module-genes.csv")
+module_info = {m: {"genes": g.gene_name.tolist(), "label": g.module_label.iloc[0]}
+               for m, g in mods.groupby("module")}
+
+# Only load AHBA / run enrichments for modules missing a cached CSV or PNG
+todo = {m: d for m, d in module_info.items()
+        if not (os.path.exists(f"{ENR_DIR}/{safe(d['label'])}.csv")
+                and os.path.exists(f"{MAP_DIR}/{safe(d['label'])}.png"))}
+print(f"{len(module_info)} modules; {len(todo)} need computing/plotting", flush=True)
+
+if todo:
+    expr, info = sh.load_ahba()
+    background = sh.brain_expressed_background(expr)
+    Z = sh.zscore_expression(expr, background)
+
+    for m, d in todo.items():
+        lab = safe(d["label"])
+        enr_path = f"{ENR_DIR}/{lab}.csv"
+
+        # enrichment: identical call to 03_05 (10k resamples, seed 0), cached per module
+        if os.path.exists(enr_path):
+            enr = pd.read_csv(enr_path)
+        else:
+            enr = sh.regional_enrichment(Z, info, d["genes"], n_perm=10000, seed=0)
+            enr.to_csv(enr_path, index=False)
+
+        # bare mode so the brains fill the canvas, then fix its two problems: re-space
+        # the views edge-to-edge with NO overlap (bare's wspace=-0.10 clips the lateral
+        # view's anterior pole), and add the colorbar on its own axes in a reserved
+        # right-hand strip so it doesn't shrink the brains.
+        # White medial wall as in the 03_05 module maps; each map on its own vmax
+        cmap = sh.diverging_cmap(); cmap.set_over("#FFFFFF")
+        vmax = sh.cortical_vmax(enr)
+        fig = sh.plot_dk_surface(dict(zip(enr.region, enr.z_vs_bg)), cmap, vmax, bare=True)
+        fig.subplots_adjust(left=0, right=0.88, top=1, bottom=0, wspace=0)
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=Normalize(-vmax, vmax)); sm.set_array([])
+        cax = fig.add_axes([0.905, 0.25, 0.018, 0.50])
+        cb = fig.colorbar(sm, cax=cax)
+        # short, symmetric ticks so the tight crop below stays identical across modules
+        t = round(vmax) if vmax >= 2 else round(vmax, 1)
+        cb.set_ticks([-t, 0, t])
+        cb.set_label("enrichment Z", fontsize=6); cb.ax.tick_params(labelsize=5)
+
+        # tight crop removes the vertical padding the 3D axes leave around the meshes —
+        # without it the PNG carries ~40% whitespace and the brains render small
+        fig.savefig(f"{MAP_DIR}/{lab}.png", dpi=300, bbox_inches="tight", pad_inches=0.02)
+        plt.close(fig)
+        print("mapped", d["label"], flush=True)
+```
+
+
+# --- 2) SynGO enrichment across all modules --- #
+
+Term-level SynGO ORA for every significant module, using exactly the 05_02 section-2
+procedure (Fisher's exact, one-sided over-representation; universe = the module's own
+study network intersected with the SynGO-annotated universe; BH within module).
+
+```{r syngo_all_modules}
+if (file.exists(syngo_cache_path)) {
+
+    df_syngo_res <- readRDS(syngo_cache_path)
+
+} else {
+
+    # Module gene sets (ensembl IDs) and per-study network backgrounds
+    module_gene_ids <- df_network_unnest %>%
+        filter(module %in% module_order, !is.na(ensembl_gene_id)) %>%
+        distinct(module, ensembl_gene_id) %>%
+        group_by(module) %>%
+        summarise(g = list(unique(ensembl_gene_id)), .groups = "drop") %>%
+        deframe()
+
+    module_study <- df_module_meta %>% dplyr::select(module, study) %>% deframe()
+
+    study_backgrounds <- df_network_unnest %>%
+        filter(study %in% module_study, !is.na(ensembl_gene_id)) %>%
+        distinct(study, ensembl_gene_id) %>%
+        group_by(study) %>%
+        summarise(g = list(unique(ensembl_gene_id)), .groups = "drop") %>%
+        deframe()
+
+    # SynGO term -> gene list; ensembl_id is a comma-space-delimited string per term.
+    # Same size filter as 02_00 (drop very small / very broad terms)
+    syngo_genes_list <- df_syngo_ontol %>%
+        dplyr::select(id, ensembl_id) %>%
+        filter(!is.na(ensembl_id)) %>%
+        separate_rows(ensembl_id, sep = ", ") %>%
+        mutate(ensembl_id = str_trim(ensembl_id)) %>%
+        group_by(id) %>%
+        summarise(genes = list(unique(ensembl_id)), .groups = "drop") %>%
+        filter(lengths(genes) >= 5 & lengths(genes) <= 1000) %>%
+        deframe()
+
+    # SynGO background: every gene annotated to any SynGO term (the list2 universe)
+    syngo_background <- df_syngo_ontol %>%
+        dplyr::select(ensembl_id) %>%
+        filter(!is.na(ensembl_id)) %>%
+        separate_rows(ensembl_id, sep = ", ") %>%
+        mutate(ensembl_id = str_trim(ensembl_id)) %>%
+        pull(ensembl_id) %>%
+        unique()
+
+    # ORA: each module vs each SynGO term it overlaps by > 1 gene (same pre-filter as 05_02)
+    df_syngo_res <- imap_dfr(module_gene_ids, function(gene_ids, mod) {
+        print(paste0("Running SynGO ORA for ", mod))
+        syngo_tested <- syngo_genes_list[
+            map_lgl(syngo_genes_list, ~ length(intersect(.x, gene_ids)) > 1)
+        ]
+        imap_dfr(syngo_tested, ~
+            ORA_fisher(
+                gene_list1       = gene_ids,
+                gene_list2       = .x,
+                background_list1 = study_backgrounds[[ module_study[[mod]] ]],
+                background_list2 = syngo_background,
+                alternative      = "greater"
+            ) %>%
+                mutate(module = mod, go_id = .y)
+        )
+    })
+
+    # Attach term name/domain; each module is its own family of tests, so BH within module
+    df_syngo_res <- df_syngo_res %>%
+        left_join(df_syngo_ontol %>% dplyr::select(go_id = id, term = name, domain),
+                  by = "go_id") %>%
+        group_by(module) %>%
+        mutate(p_adj = p.adjust(p_value, method = "BH"), .before = n_overlap) %>%
+        ungroup() %>%
+        dplyr::rename(n_module = n_list1, n_pathway = n_list2) %>%
+        mutate(pct_module = n_overlap / n_module * 100) %>%
+        dplyr::select(module, go_id, term, domain, everything()) %>%
+        arrange(module, p_value)
+
+    saveRDS(df_syngo_res, file = syngo_cache_path)
+}
+```
+
+
+# --- 3) BrainSpan developmental trajectories --- #
+
+Per-module trajectories, computed exactly as in TRY_module-dev-plots (which reuses the
+02_04 BrainSpan pipeline: Satterstrom et al. sample/gene filtering, per-gene z-scoring,
+background-subtracted per-sample means, then a within-timepoint z-score across modules).
+Cached because the raw BrainSpan matrix is slow to load; the module set here is the 28
+stepwise modules (the TRY notebook used a stale 29-module set).
+
+```{r brainspan_trajectories}
+if (file.exists(traj_cache_path)) {
+
+    df_traj_module <- readRDS(traj_cache_path)
+
+} else {
+
+    ## Load BrainSpan (RNA-Seq Gencode v10 summarized to genes)
+    brainspan_dir <- file.path(data_dir, "BrainSpan")
+    df_bs_expr    <- read_csv(file.path(brainspan_dir, "expression_matrix.csv"),
+                              col_names = FALSE, show_col_types = FALSE)
+    df_bs_genes   <- read_csv(file.path(brainspan_dir, "rows_metadata.csv"),
+                              show_col_types = FALSE) %>% clean_names()
+    df_bs_samples <- read_csv(file.path(brainspan_dir, "columns_metadata.csv"),
+                              show_col_types = FALSE) %>% clean_names()
+
+    mat_expr_full <- as.matrix(df_bs_expr[, -1])
+    rownames(mat_expr_full) <- df_bs_genes$gene_symbol
+    colnames(mat_expr_full) <- as.character(df_bs_samples$column_num)
+    rm(df_bs_expr)
+
+    ## Sample processing (age -> pcw -> Kang et al. 2011 stage; neocortex only)
+    parse_bs_age_pcw <- function(age_str) {
+        num  <- as.numeric(str_extract(age_str, "[0-9.]+"))
+        unit <- str_extract(age_str, "[a-z]+")
+        case_when(
+            unit == "pcw" ~ num,
+            unit == "mos" ~ 40 + num * (52.18 / 12),
+            unit == "yrs" ~ 40 + num * 52.18,
+            TRUE          ~ NA_real_
+        )
+    }
+    assign_dev_stage <- function(pcw) {
+        factor(case_when(
+            pcw <   8                     ~ "Embryonic",
+            pcw <  13                     ~ "Early fetal",
+            pcw <  19                     ~ "Early mid-fetal",
+            pcw <  24                     ~ "Late mid-fetal",
+            pcw <  38                     ~ "Late fetal",
+            pcw < (40 +  6 * 52.18 / 12)  ~ "Neonatal and early infancy",
+            pcw < (40 + 12 * 52.18 / 12)  ~ "Late infancy",
+            pcw < (40 +  6 * 52.18)       ~ "Early childhood",
+            pcw < (40 + 12 * 52.18)       ~ "Middle and late childhood",
+            pcw < (40 + 20 * 52.18)       ~ "Adolescence",
+            pcw < (40 + 40 * 52.18)       ~ "Young adulthood",
+            pcw < (40 + 60 * 52.18)       ~ "Middle adulthood",
+            TRUE                          ~ "Late adulthood"
+        ), levels = stage_levels)
+    }
+
+    neocortex_regions <- c("DFC", "VFC", "MFC", "OFC", "M1C", "S1C", "A1C",
+                           "IPC", "STC", "ITC", "V1C")
+    df_samples_filt <- df_bs_samples %>%
+        mutate(pcw = parse_bs_age_pcw(age), dev_stage = assign_dev_stage(pcw),
+               is_prenatal = pcw < 40) %>%
+        filter(structure_acronym %in% neocortex_regions) %>%
+        mutate(epoch = if_else(is_prenatal, "prenatal", "postnatal"),
+               region_epoch = paste(structure_acronym, epoch, sep = "_"))
+
+    ## Gene filter (RPKM >= 0.5 in >= 80% of samples in >= 1 region x epoch) and z-score
+    sample_cols         <- as.character(df_samples_filt$column_num)
+    mat_rpkm            <- mat_expr_full[, sample_cols]
+    region_epoch_groups <- unique(df_samples_filt$region_epoch)
+    pct_expressed <- sapply(region_epoch_groups, function(re) {
+        cols <- df_samples_filt$column_num[df_samples_filt$region_epoch == re]
+        rowMeans(mat_rpkm[, as.character(cols), drop = FALSE] >= 0.5)
+    })
+    expressed_genes <- rownames(pct_expressed)[apply(pct_expressed, 1, max) >= 0.8]
+    mat_log2 <- log2(mat_rpkm[expressed_genes, ] + 1)
+    mat_z    <- t(scale(t(mat_log2)))
+
+    ## Per-sample mean z-score for each module gene list, background-subtracted
+    compute_traj_samples <- function(gene_lists, mat_z, df_samples_filt, background_means = NULL) {
+        map_dfr(names(gene_lists), function(label) {
+            genes <- intersect(gene_lists[[label]], rownames(mat_z))
+            if (length(genes) < 5) { warning(label, ": < 5 genes in BrainSpan — skipping"); return(NULL) }
+            sample_means <- colMeans(mat_z[genes, , drop = FALSE], na.rm = TRUE)
+            if (!is.null(background_means)) sample_means <- sample_means - background_means[names(sample_means)]
+            tibble(module = label, column_num = names(sample_means), mean_z = sample_means)
+        }) %>%
+            left_join(df_samples_filt %>% mutate(column_num = as.character(column_num)) %>%
+                          dplyr::select(column_num, pcw, dev_stage), by = "column_num") %>%
+            mutate(log10_pcw = log10(pcw))
+    }
+
+    module_lists <- df_sig_module_genes %>%
+        group_by(module) %>%
+        summarise(genes = list(unique(gene_name)), .groups = "drop") %>%
+        deframe()
+
+    background_sample_means <- colMeans(mat_z, na.rm = TRUE)
+
+    df_traj_module <- compute_traj_samples(module_lists, mat_z, df_samples_filt,
+                                           background_means = background_sample_means) %>%
+        group_by(pcw) %>% mutate(mean_z = as.numeric(scale(mean_z))) %>% ungroup()
+
+    saveRDS(df_traj_module, file = traj_cache_path)
+}
+
+# x-axis stage breaks: median log10(pcw) per Kang et al. stage
+stage_x_breaks <- df_traj_module %>%
+    mutate(dev_stage = factor(dev_stage, levels = stage_levels)) %>%
+    group_by(dev_stage) %>%
+    summarise(x = median(log10_pcw), .groups = "drop") %>%
+    arrange(dev_stage)
+```
+
+
+# --- 4) Panel functions --- #
+
+## 4.1 Slide header
+
+```{r header_function}
+# Module label in its topic color, with study, size, and stepwise association stats
+make_header <- function(meta) {
+    size_lab <- paste0(meta$n_genes, " genes")
+    if (meta$n_transcripts > meta$n_genes) {
+        size_lab <- paste0(meta$n_transcripts, " transcripts / ", size_lab)
+    }
+    # co-expression modules get their original module name up front; for the regulons the
+    # module ID is just a variant of the label, so it would be redundant
+    module_id_lab <- if (meta$study %in% c("GandalGenes", "GandalIsoforms", "Wen")) {
+        paste0(meta$module, "  ·  ")
+    } else {
+        ""
+    }
+    subtitle <- paste0(
+        module_id_lab, meta$study, "  ·  ", size_lab,
+        "  ·  stepwise std beta = ", signif(meta$beta_std, 2),
+        ", FDR = ", signif(meta$p_adj, 2)
+    )
+    ggplot() +
+        annotate("text", x = 0, y = 0.45, label = meta$module_label,
+                 fontface = "bold", size = 5.5, color = topic_colors[[meta$topic]]) +
+        annotate("text", x = 0, y = -0.55, label = subtitle, size = 2.8, color = "gray30") +
+        scale_y_continuous(limits = c(-1, 1)) +
+        theme_void()
+}
+```
+
+## 4.2 GO similarity graph of ASD genes in the module
+
+```{r go_graph_function}
+# Same construction as 05_03: hub gene/TF + the module's ASD risk genes, each node linked
+# to its top-3 non-zero GO-BP cosine-similarity partners; hub bolded
+node_stats <- df_asd_rarevar_zscore %>%
+    left_join(df_gene_assignments, by = join_by(gene_name)) %>%
+    dplyr::select(gene_name, GO_topic, log_bf = log_BF)
+
+plot_module_go_graph <- function(mod, hub_gene) {
+    mod_net   <- all_module_nets[[mod]]
+    mod_genes <- df_sig_module_genes %>% filter(module == mod) %>% pull(gene_name)
+
+    risk_genes    <- intersect(asd_risk_genes, mod_genes)
+    genes_to_plot <- unique(c(hub_gene, risk_genes))
+
+    # only genes in the GO-BP similarity matrix can have edges (some hub TFs have no
+    # GO-BP annotation and aren't in sim_mat); all genes stay as vertices so isolated
+    # risk genes still show
+    in_sim <- intersect(genes_to_plot, rownames(mod_net$sim_mat))
+    mod_edges <- if (length(in_sim) >= 2) {
+        go_knn_edges(mod_net$sim_mat[in_sim, in_sim, drop = FALSE], k_nn = 3) %>%
+            filter(similarity > 0)
+    } else {
+        tibble(from = character(), to = character(), similarity = numeric())
+    }
+    net <- graph_from_data_frame(mod_edges, directed = FALSE,
+                                 vertices = tibble(name = genes_to_plot))
+
+    # per-module scale limits (guarded: a module can have no edges or no scored nodes)
+    sim_rng <- if (nrow(mod_edges) > 0) range(mod_edges$similarity) else NULL
+    logbf   <- node_stats %>% filter(gene_name %in% genes_to_plot) %>% pull(log_bf)
+    logbf_rng <- if (any(is.finite(logbf))) range(logbf, na.rm = TRUE) else NULL
+
+    plot_go_graph(
+        net = net, node_stats = node_stats, bold_genes = hub_gene,
+        title = paste0("GO similarity of ASD genes (n = ", length(risk_genes), ")"),
+        size_range = c(2, 6), size_limits = logbf_rng,
+        edge_range = c(0.01, 0.50), edge_limits = sim_rng, edge_color = "gray60",
+        topic_legend = FALSE, xmult = 0.05, ymult = 0.05, label_vjust = -1.2,
+        seed = 1221
+    )
+}
+```
+
+## 4.3 Brain spatial map (reads the python-generated PNG)
+
+```{r brain_panel_function}
+# The matplotlib surface can't be combined with ggplots directly, so the PNG (which
+# carries its own colorbar; each map is on its own vmax) is read back as a raster
+plot_module_brain <- function(module_label) {
+    lab      <- safe_label(module_label)
+    png_path <- file.path(brain_map_dir, paste0(lab, ".png"))
+
+    if (!file.exists(png_path)) {
+        return(ggplot() + theme_void() +
+                   labs(title = "Cortical enrichment map not generated") +
+                   theme(plot.title = element_text(size = 7, hjust = 0.5)))
+    }
+
+    ggplot() +
+        annotation_custom(grid::rasterGrob(png::readPNG(png_path))) +
+        labs(title = "Cortical spatial enrichment (AHBA)") +
+        theme_void() +
+        theme(plot.title = element_text(size = 7, hjust = 0.5, face = "bold"))
+}
+```
+
+## 4.4 BrainSpan developmental trajectory
+
+```{r traj_panel_function}
+# Recreates the TRY_module-dev-plots per-module panel: loess through the within-timepoint
+# z-scores, prenatal window shaded, birth (40 pcw) dashed
+plot_module_traj <- function(mod, topic) {
+    col <- unname(topic_colors[[topic]])
+    df_traj_module %>%
+        filter(module == mod) %>%
+        ggplot(aes(x = log10_pcw, y = mean_z)) +
+        annotate("rect", xmin = -Inf, xmax = log10(40), ymin = -Inf, ymax = Inf,
+                 fill = "grey92", alpha = 0.6) +
+        geom_vline(xintercept = log10(40), linetype = "dashed", color = "grey60", linewidth = 0.3) +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "grey60", linewidth = 0.3) +
+        geom_point(size = 0.05, alpha = 0.2, color = col) +
+        geom_smooth(method = "loess", span = 0.4, linewidth = 0.8, se = TRUE, alpha = 0.15,
+                    color = NA, fill = col, show.legend = FALSE) +
+        geom_smooth(method = "loess", span = 0.4, linewidth = 0.4, color = col) +
+        scale_x_continuous(
+            breaks = stage_x_breaks$x,
+            labels = as.character(stage_x_breaks$dev_stage) %>%
+                str_replace("Neonatal and early infancy", "Neonatal and\nearly infancy") %>%
+                str_replace("Middle and late childhood",  "Middle and\nlate childhood"),
+            expand = expansion(mult = 0.02)) +
+        labs(x = NULL, y = "Within-timepoint Z", title = "BrainSpan developmental trajectory") +
+        theme(
+            plot.title         = element_text(size = 7, hjust = 0.5, face = "bold"),
+            axis.title.y       = element_text(size = 6),
+            axis.text.x        = element_text(size = 5, angle = 90, hjust = 1, vjust = 0.5,
+                                              color = "black"),
+            axis.text.y        = element_text(size = 5, color = "black"),
+            legend.position    = "none",
+            panel.border       = element_rect(color = "gray50"),
+            panel.grid.major.x = element_blank()
+        )
+}
+```
+
+## 4.5 GO / SynGO enrichment bars
+
+```{r enrichment_bars_function}
+# Number of terms per ontology facet shown in each enrichment panel (3-5 works well)
+n_top_terms <- 4
+
+# Terms are selected at nominal p < 0.05 (several modules have no BH-significant SynGO
+# terms) but plotted on the FDR scale, so the dashed line marks which clear BH.
+# Fill ramps white -> topic color by odds ratio on a log scale; the ramp limits are
+# panel-specific (GO and SynGO ORs live on different ranges, so a shared scale washes
+# one of them out); an invisible layer carries the colorbar because fill is an identity
+# scale. Adapted from 05_02.
+plot_enrichment_bars <- function(df, topic, title, n_top = n_top_terms) {
+    d <- df %>%
+        filter(p_value < 0.05) %>%
+        group_by(ontology) %>%
+        slice_min(p_value, n = n_top, with_ties = FALSE) %>%
+        ungroup()
+
+    if (nrow(d) == 0) {
+        return(ggplot() + theme_void() +
+                   labs(title = paste0(title, "\n(no enriched terms)")) +
+                   theme(plot.title = element_text(size = 7, hjust = 0.5, face = "bold")))
+    }
+
+    # Panel-specific odds-ratio limits from the terms actually shown; infinite odds
+    # ratios (an empty 2x2 cell) are excluded from the limits but plot at the ramp top
+    or_vals   <- d %>% filter(is.finite(odds_ratio)) %>% pull(odds_ratio)
+    or_limits <- if (length(or_vals) >= 2 && diff(range(or_vals)) > 0) {
+        range(or_vals)
+    } else {
+        c(1, max(10, or_vals))
+    }
+
+    ramp <- colorRamp(c("white", topic_colors[[topic]]))
+    rescale_or <- function(x) {
+        z <- (log10(x) - log10(or_limits[1])) / (log10(or_limits[2]) - log10(or_limits[1]))
+        pmin(pmax(z, 0), 1)
+    }
+
+    d <- d %>%
+        mutate(
+            fill_color = rgb(ramp(rescale_or(odds_ratio)), maxColorValue = 255),
+            term       = str_remove(term, "\\s*\\(GO:\\d+\\)") %>% str_wrap(width = 40),
+            term       = reorder_within(term, -log10(p_adj), ontology)
+        )
+
+    ggplot(d, aes(x = -log10(p_adj), y = term)) +
+        geom_col(aes(fill = fill_color), width = 0.7, color = "grey60", linewidth = 0.15) +
+        geom_point(aes(color = odds_ratio), shape = NA) +  # invisible; drives the colorbar
+        geom_vline(xintercept = -log10(0.05), linetype = 2, linewidth = 0.3, color = "grey30") +
+        facet_grid(ontology ~ ., scales = "free_y", space = "free_y") +
+        scale_y_reordered() +
+        scale_fill_identity() +
+        scale_color_gradientn(colors = c("white", topic_colors[[topic]]), name = "Odds ratio",
+                              transform = "log10", limits = or_limits,
+                              guide = guide_colorbar(barwidth  = unit(0.15, "cm"),
+                                                     barheight = unit(1.2, "cm"))) +
+        scale_x_continuous(expand = expansion(mult = c(0, 0.08))) +
+        labs(x = "-log10(FDR)", y = NULL, title = title) +
+        theme(
+            plot.title      = element_text(size = 7, hjust = 0.5, face = "bold"),
+            axis.text.y     = element_text(size = 4.5, color = "black"),
+            axis.text.x     = element_text(size = 5),
+            axis.title.x    = element_text(size = 6),
+            strip.text.y    = element_text(size = 6, angle = 0,
+                                           margin = margin(l = 2, r = 2)),
+            strip.background = element_rect(fill = "grey92", color = NA),
+            panel.grid      = element_blank(),
+            panel.border    = element_rect(linewidth = 0.25),
+            panel.spacing   = unit(0.1, "cm"),
+            legend.position = "right",
+            legend.title    = element_text(size = 5.5),
+            legend.text     = element_text(size = 5)
+        )
+}
+
+```
+
+## 4.6 Top kME hubs (co-expression modules only)
+
+```{r hub_panel_function}
+plot_module_hubs <- function(mod, n_hubs = 10) {
+    df_module_kme %>%
+        filter(module == mod & kME_module == mod) %>%
+        # isoform modules carry one row per transcript; keep each gene's best transcript
+        arrange(-kME) %>%
+        distinct(gene_name, .keep_all = TRUE) %>%
+        slice_max(order_by = kME, n = n_hubs, with_ties = FALSE) %>%
+        # ASD risk genes bolded on the y-axis (rendered by element_markdown)
+        mutate(gene_lab = if_else(gene_name %in% asd_risk_genes,
+                                  paste0("**", gene_name, "**"), gene_name)) %>%
+        ggplot(aes(x = kME, y = reorder(gene_lab, kME))) +
+        geom_col(aes(fill = kME), color = "black", linewidth = 0.25, width = 0.75) +
+        scale_fill_gradientn(colors = c("gray90", "gray20"), guide = "none") +
+        scale_x_continuous(expand = expansion(mult = c(0, 0.05))) +
+        labs(x = "kME", y = NULL, title = paste0("Top ", n_hubs, " hub genes")) +
+        theme(
+            plot.title  = element_text(size = 7, hjust = 0.5, face = "bold"),
+            axis.text.y = element_markdown(size = 6, color = "black"),
+            axis.text.x = element_text(size = 5),
+            axis.title.x = element_text(size = 6)
+        )
+}
+```
+
+
+# --- 5) Assemble slides and export PDF --- #
+
+## 5.1 Build one slide per module
+
+```{r build_slides}
+# Slide layout: header strip; GO graph (wide) | hubs; brain map | trajectory;
+# GO bars | SynGO bars. Regulon modules have no kME, so their hub cell is blank.
+# Each row is its own nested patchwork: a single flat design grid shares alignment
+# columns across ALL rows, so the enrichment panels' wide term labels and legends
+# would carve ~2 in out of the brain panel two rows up
+slide_heights <- c(0.5, 3.0, 1.6, 2.2)
+
+coexpr_modules <- df_module_kme %>% pull(module) %>% unique() %>% as.character()
+
+make_module_slide <- function(mod) {
+    meta <- df_module_meta %>% filter(module == mod)
+    print(paste0("Building slide for ", meta$module_label))
+
+    df_go_mod    <- df_go_res %>% filter(module == mod)
+    df_syngo_mod <- df_syngo_res %>% filter(module == mod) %>% dplyr::rename(ontology = domain)
+
+    p_header <- make_header(meta)
+    p_graph  <- plot_module_go_graph(mod, meta$hub_gene)
+    p_brain  <- plot_module_brain(meta$module_label)
+    p_hubs   <- if (mod %in% coexpr_modules) plot_module_hubs(mod) else plot_spacer()
+    p_traj   <- plot_module_traj(mod, meta$topic)
+    p_go     <- plot_enrichment_bars(df_go_mod, meta$topic, "GO enrichment (P < 0.05)")
+    p_syngo  <- plot_enrichment_bars(df_syngo_mod, meta$topic, "SynGO enrichment (P < 0.05)")
+
+    wrap_plots(
+        p_header,
+        wrap_plots(free(p_graph), p_hubs, nrow = 1, widths = c(8, 2)),
+        wrap_plots(free(p_brain), p_traj, nrow = 1, widths = c(5, 5)),
+        wrap_plots(p_go, p_syngo, nrow = 1, widths = c(5, 5)),
+        ncol = 1, heights = slide_heights
+    )
+}
+
+all_slides <- map(module_order, make_module_slide)
+names(all_slides) <- module_order
+```
+
+## 5.2 Export one multi-page PDF (alphabetical by module label)
+
+```{r export_slides, fig.width = 10, fig.height = 7.5}
+pdf(file.path(slides_dir, "module-slides.pdf"), width = 8.5, height = 9)
+walk(all_slides, print)
+dev.off()
+
+all_slides
+```

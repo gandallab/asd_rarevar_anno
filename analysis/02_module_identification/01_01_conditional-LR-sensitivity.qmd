@@ -1,7 +1,7 @@
 ---
 title: "01. Stepwise conditional analysis — binomial (ASD gene binary)"
 description: "(1) Are modules individually associated with ASD risk, and (2) Are modules independently associated with ASD risk?\nOutcome: binary ASD gene status (FDR threshold). Combined across all studies (testing all modules simultaneously)."
-date: 2026-07-06
+date: 2026-08-04
 format: html
 ---
 
@@ -281,13 +281,13 @@ get_risk_gene_hub_modules <- function(fdr_threshold) {
         pull(module) %>%
         unique()
 
-    # Co-expression modules where at least one of the top-10 hub genes by kME is a risk gene
+    # Co-expression modules whose top hub gene by kME is a risk gene
     risk_gene_mods <- df_module_kme %>%
         filter(module == kME_module) %>%
         group_by(module) %>%
         arrange(module, -kME) %>%
         mutate(rank = row_number()) %>%
-        filter(rank %in% 1:10) %>%
+        filter(rank == 1) %>%
         filter(ensembl_gene_id %in% asd_risk_genes) %>%
         pull(module) %>%
         unique() %>%
@@ -309,18 +309,18 @@ df_gene_set_size <- df_network_data %>%
 # Module display label (from 00_00; hub gene for co-expression, TF +/- for regulons)
 df_module_label_map <- df_network_data %>%
     unnest(cols = c(data)) %>%
-    distinct(module, module_label)
+    distinct(study, module, module_label)
 
-# Annotate every threshold's results with study, module label, module size, and whether the
+# Annotate every threshold's results with module label, module size, and whether the
 # hub/TF is a risk gene *at that threshold* (risk-gene set matched to each model's FDR cutoff)
 l_stepwise_all <- purrr::map(l_stepwise_all, function(res) {
     risk_gene_hub_modules <- get_risk_gene_hub_modules(res$fdr_threshold)
     res$glm_results <- res$glm_results %>%
-        left_join(df_module_label_map, by = join_by(study, module)) %>%
-        left_join(df_gene_set_size,    by = join_by(study, module)) %>%
+        left_join(df_module_label_map, by = join_by(module)) %>%
+        left_join(df_gene_set_size,    by = join_by(module)) %>%
         distinct() %>%
         mutate(hub_is_risk_gene = module %in% risk_gene_hub_modules) %>%
-        dplyr::select(study, module, module_label, n_genes_module, hub_is_risk_gene, everything())
+        dplyr::select(module, module_label, n_genes_module, hub_is_risk_gene, everything())
     res
 })
 
@@ -343,6 +343,14 @@ l_stepwise_all <- readRDS(file.path(notebook_out_dir, "01_01_stepwise-binomial-a
 df_sensitivity_combined <- purrr::map_dfr(l_stepwise_all, ~ .x$glm_results) %>%
     mutate(fdr_label = factor(paste0("FDR < ", fdr_threshold),
                               levels = paste0("FDR < ", sort(unique(fdr_threshold)))))
+
+# One color per TADA FDR threshold, shared by the significance heatmap (3.1) and the
+# OR forest plot (3.2) so the two supplementary panels are read on the same key
+fdr_levels <- levels(df_sensitivity_combined$fdr_label)
+fdr_colors <- setNames(
+    brewer.pal(max(3, length(fdr_levels)), "Dark2")[seq_along(fdr_levels)],
+    fdr_levels
+)
 ```
 
 ## 3.1 Module significance across thresholds
@@ -367,19 +375,24 @@ df_heatmap_plot <- df_threshold_presence %>%
     mutate(module_label = fct_reorder(module_label, neg_log10_p,
                                       .fun = ~ sum(.x, na.rm = TRUE)))
 
+# Each column ramps white -> that threshold's colour from the OR plot (3.2). Color is
+# carried by fill (fdr_label), significance by opacity; the opacity scale has common
+# limits across columns so tile intensity is comparable between thresholds.
 p_heatmap_thresh <- df_heatmap_plot %>%
-    ggplot(aes(x = fdr_label, y = module_label, fill = neg_log10_p)) +
+    ggplot(aes(x = fdr_label, y = module_label, fill = fdr_label, alpha = neg_log10_p)) +
     geom_tile(color = "grey85", linewidth = 0.4) +
-    scale_fill_gradient(
-        low      = "#c6dbef",
-        high     = "#3B4CC0",   # matches the linear-model sensitivity heatmap (01_00 §5.1)
-        na.value = "white",
-        name     = "-log10(FDR)"
+    scale_fill_manual(values = fdr_colors, guide = "none") +
+    scale_alpha_continuous(
+        range    = c(0.15, 1),  # floor > 0 so weakly significant tiles stay visible against white
+        limits   = c(0, max(df_heatmap_plot$neg_log10_p, na.rm = TRUE)),
+        na.value = 0,           # module not significant at this threshold -> white tile
+        name     = "-log10(FDR)",
+        guide    = guide_legend(override.aes = list(fill = "grey20", color = NA))
     ) +
     labs(
         x     = "ASD gene threshold",
         y     = NULL,
-        title = NULL#"Module significance across FDR thresholds"
+        title = "Module significance across TADA FDR thresholds"
     ) +
     theme(
         axis.text.y       = element_text(size = 5.5),
@@ -392,7 +405,8 @@ p_heatmap_thresh <- df_heatmap_plot %>%
         legend.text     = element_text(size = 5.5),
         legend.title     = element_text(size = 6),
         panel.grid   = element_blank(),
-        panel.border = element_blank()
+        panel.border = element_blank(),
+        plot.title = element_text(size = 7, face = "bold")
     )
 
 p_heatmap_thresh
@@ -414,11 +428,11 @@ p_or_thresholds <- df_sensitivity_combined %>%
     ) +
     geom_point(size = 0.75, position = position_dodge(width = 0.9)) +
     scale_x_log10() +
-    scale_color_brewer(palette = "Dark2", name = "ASD gene threshold") +
+    scale_color_manual(values = fdr_colors, name = "ASD gene threshold") +
     labs(
         x     = "Odds ratio (log scale)",
         y     = NULL,
-        title = NULL#"Sensitivity: module OR across FDR thresholds"
+        title = "Module OR across TADA FDR thresholds"
     ) +
     theme(
         legend.position = "right",
@@ -426,8 +440,8 @@ p_or_thresholds <- df_sensitivity_combined %>%
         axis.text      = element_text(size = 5.5), 
         axis.title      = element_text(size = 6),
         legend.text     = element_text(size = 5.5),
-        legend.title     = element_text(size = 6)
-
+        legend.title     = element_text(size = 6),
+        plot.title = element_text(size = 7, face = "bold")
     )
 
 p_or_thresholds
@@ -445,120 +459,10 @@ fig_lr_sensitivity <- p_heatmap_thresh + p_or_thresholds +
 fig_lr_sensitivity
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "01_01_LR-sensitivity-combined.png"),
+    filename = file.path(figures_dir, "supplement", "01_01_LR-sensitivity-combined.pdf"),
     plot = fig_lr_sensitivity,
     height    = 4.5,
     width     = 7.09,
     dpi       = 300
 )
-```
-
-# ---------------------------------------------------------------
-
-# DEPR Bubble plots — faceted by TADA FDR threshold
-
-```{r p_bubble_facet, fig.height = 3, fig.width = 7.09}
-# Bubble-specific prep (relocated from section 3.0)
-# Hub gene per co-expression module (highest kME in its native module)
-hub_gene_map_lr <- df_module_kme %>%
-    filter(module == kME_module) %>%
-    group_by(module) %>%
-    slice_max(kME, n = 1, with_ties = FALSE) %>%
-    ungroup() %>%
-    dplyr::select(module, hub_gene = gene_name)
-
-# Gene set sizes (all networks combined)
-df_gene_set_size_lr <- df_network_data %>%
-    unnest(cols = c(data)) %>%
-    count(module, name = "n_genes_module")
-
-# N ASD genes at each TADA FDR threshold (full TADA dataset, not model inner-join)
-n_asd_by_thresh <- tibble(fdr_threshold = c(0.001, 0.01, 0.05, 0.1)) %>%
-    mutate(
-        n_genes     = map_int(fdr_threshold,
-                              ~ df_asd_rarevar_zscore %>% filter(FDR < .x & !FLAG) %>% nrow()),
-        facet_label = paste0("TADA FDR < ", fdr_threshold, ";\nN=", n_genes, " genes"),
-        facet_label = factor(facet_label, levels = facet_label),
-        fdr_label   = paste0("FDR < ", fdr_threshold),
-        fdr_label   = factor(fdr_label, levels = fdr_label)
-    )
-
-# Module → y_axis_label + topic color look-up (one row per unique module)
-df_lr_labels <- df_sensitivity_combined %>%
-    distinct(module) %>%
-    left_join(hub_gene_map_lr, by = "module") %>%
-    mutate(
-        is_regulon   = is.na(hub_gene),
-        regulon_gene = str_extract(module, "^[^_\\-\\+]+"),
-        regulon_sign = str_extract(str_remove(module, "^[^_\\-\\+]+"), "[\\+\\-]"),
-        y_axis_label = if_else(is_regulon,
-                               paste0(regulon_gene, " (", regulon_sign, ")"),
-                               hub_gene),
-        # ENSG ID leaked through for MARCHF4 in some network versions
-        y_axis_label = if_else(y_axis_label == "43894", "MARCHF4", y_axis_label)
-    ) %>%
-    left_join(df_module_topics_lr, by = "module") %>%
-    dplyr::select(module, y_axis_label, topic_label, topic_color)
-
-df_bubble <- df_sensitivity_combined %>%
-    filter(log_or > 0 & p_adj < 0.001) %>%
-    left_join(df_lr_labels,        by = "module") %>%
-    left_join(df_gene_set_size_lr, by = "module") %>%
-    left_join(n_asd_by_thresh %>% dplyr::select(fdr_threshold, facet_label),
-              by = "fdr_threshold")
-# hub_is_risk_gene comes from the annotated results (see section 2.5)
-
-# Topic legend: map hex color → display label
-topic_map_lr <- df_bubble %>%
-    distinct(topic_color, topic_label) %>%
-    filter(!is.na(topic_color))
-
-p_bubble_facet <- df_bubble %>%
-    ggplot(aes(x = or, y = -log10(p_adj))) +
-    geom_point(
-        aes(fill = topic_color, color = hub_is_risk_gene, size = n_genes_module),
-        shape = 21
-    ) +
-    ggrepel::geom_text_repel(
-        aes(label = y_axis_label),
-        size               = 1.8,
-        min.segment.length = 0,
-        max.overlaps       = Inf,
-        force              = 1.5,
-        box.padding        = 0.3,
-        point.padding      = 0.4,
-        segment.color      = "grey50",
-        segment.size       = 0.2,
-        color              = "black",
-        show.legend        = FALSE
-    ) +
-    scale_x_log10() +
-    scale_fill_identity(
-        guide  = guide_legend(title = NULL,
-                              override.aes = list(size = 3, shape = 21, color = "grey30")),
-        labels = setNames(topic_map_lr$topic_label, topic_map_lr$topic_color)
-    ) +
-    scale_color_manual(
-        values = c("TRUE" = "black", "FALSE" = "grey70"),
-        labels = c("TRUE" = "Yes",   "FALSE" = "No"),
-        name   = "Hub/TF is\nrisk gene"
-    ) +
-    scale_size_continuous(range = c(1, 4), name = "# genes") +
-    facet_wrap(~ facet_label, nrow = 1, scales = "free") +
-    labs(x = "Odds ratio", y = "-log10(FDR)") +
-    theme(
-        strip.text       = element_text(face = "bold", size = 7),
-        strip.background = element_blank(),
-        legend.position  = "bottom",
-        legend.key.size  = unit(0.3, "cm"),
-        legend.box       = "horizontal",
-        legend.direction = "vertical",
-        legend.margin    = margin(t = -5),
-        axis.text      = element_text(size = 5.5), 
-        axis.title      = element_text(size = 6),
-        legend.text     = element_text(size = 5.5),
-        legend.title     = element_text(size = 6)
-    )
-
-p_bubble_facet
 ```

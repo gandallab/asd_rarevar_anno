@@ -1,0 +1,169 @@
+module,module_label,final_assigned_topic,topic,topic_label,assignment_prop,gamma
+ZBTB18_+_+,ZBTB18 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0,0.0027311218723589338
+ZBTB18_+_+,ZBTB18 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.67,0.5476728959584013
+ZBTB18_+_+,ZBTB18 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0.33,0.44959598216923974
+FOXP2_(+),FOXP2 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.112,0.28143714696083494
+FOXP2_(+),FOXP2 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.714,0.6477058695169068
+FOXP2_(+),FOXP2 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0.174,0.07085698352225825
+M112-xx,RBM27,GR,"genomic regulation / 
+RNA processing",GR,0.793,0.9578004523341698
+M112-xx,RBM27,GR,"neuron development / 
+morphogenesis",MORPH,0.207,0.04182204793700422
+M112-xx,RBM27,GR,"synaptic transmission / 
+ion transport",SYN,0,3.774997288259533e-4
+NRF1_(+),NRF1 (+),GR,"genomic regulation / 
+RNA processing",GR,0.83,0.9568540139377151
+NRF1_(+),NRF1 (+),GR,"neuron development / 
+morphogenesis",MORPH,0.17,0.03987019221416548
+NRF1_(+),NRF1 (+),GR,"synaptic transmission / 
+ion transport",SYN,0,0.0032757938481192996
+CUX1_(+),CUX1 (+),GR,"genomic regulation / 
+RNA processing",GR,0.874,0.6405664600341933
+CUX1_(+),CUX1 (+),GR,"neuron development / 
+morphogenesis",MORPH,0.126,0.3555567446431963
+CUX1_(+),CUX1 (+),GR,"synaptic transmission / 
+ion transport",SYN,0,0.0038767953226103756
+M11-iso,VEZF1,GR,"genomic regulation / 
+RNA processing",GR,0.877,0.8786463880972031
+M11-iso,VEZF1,GR,"neuron development / 
+morphogenesis",MORPH,0.123,0.12078458175069211
+M11-iso,VEZF1,GR,"synaptic transmission / 
+ion transport",SYN,0,5.690301521046109e-4
+M56-xx,NDUFV1,GR,"genomic regulation / 
+RNA processing",GR,0.883,0.030316265102109226
+M56-xx,NDUFV1,GR,"neuron development / 
+morphogenesis",MORPH,0.117,0.9638395443270367
+M56-xx,NDUFV1,GR,"synaptic transmission / 
+ion transport",SYN,0,0.005844190570854042
+M1-tr2,SPEN,GR,"genomic regulation / 
+RNA processing",GR,0.894,0.9274704024797513
+M1-tr2,SPEN,GR,"neuron development / 
+morphogenesis",MORPH,0.106,0.07095318357424484
+M1-tr2,SPEN,GR,"synaptic transmission / 
+ion transport",SYN,0,0.0015764139460038105
+M6-iso,TNRC6C,GR,"genomic regulation / 
+RNA processing",GR,0.894,0.8678469519035485
+M6-iso,TNRC6C,GR,"neuron development / 
+morphogenesis",MORPH,0.106,0.13016017699277177
+M6-iso,TNRC6C,GR,"synaptic transmission / 
+ion transport",SYN,0,0.0019928711036796285
+M2-gene,EP300,GR,"genomic regulation / 
+RNA processing",GR,0.897,0.9865698946719802
+M2-gene,EP300,GR,"neuron development / 
+morphogenesis",MORPH,0.103,0.012804190590753235
+M2-gene,EP300,GR,"synaptic transmission / 
+ion transport",SYN,0,6.259147372667817e-4
+JUND_(+),JUND (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.094,0.17636327384340236
+JUND_(+),JUND (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.906,0.5087876114813037
+JUND_(+),JUND (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0,0.314849114675294
+ZNF281_(+),ZNF281 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.008,0.0075141196824280955
+ZNF281_(+),ZNF281 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.91,0.7751339278791073
+ZNF281_(+),ZNF281 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0.082,0.21735195243846464
+NR3C1_(+),NR3C1 (+),GR,"genomic regulation / 
+RNA processing",GR,0.911,0.990604219483526
+NR3C1_(+),NR3C1 (+),GR,"neuron development / 
+morphogenesis",MORPH,0.089,0.00837770059887263
+NR3C1_(+),NR3C1 (+),GR,"synaptic transmission / 
+ion transport",SYN,0,0.0010180799176013275
+IsoformM12_lightgreen,TTBK1,GR,"genomic regulation / 
+RNA processing",GR,0.914,0.6277843595243816
+IsoformM12_lightgreen,TTBK1,GR,"neuron development / 
+morphogenesis",MORPH,0.086,0.016952818520305092
+IsoformM12_lightgreen,TTBK1,GR,"synaptic transmission / 
+ion transport",SYN,0,0.3552628219553133
+MZF1_(+),MZF1 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.074,0.02641462340233756
+MZF1_(+),MZF1 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.926,0.9648314226991287
+MZF1_(+),MZF1 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0,0.00875395389853379
+BHLHE22_-_+,BHLHE22 (-),MORPH,"genomic regulation / 
+RNA processing",GR,0.006,0.028405176594452665
+BHLHE22_-_+,BHLHE22 (-),MORPH,"neuron development / 
+morphogenesis",MORPH,0.928,0.9558918894221525
+BHLHE22_-_+,BHLHE22 (-),MORPH,"synaptic transmission / 
+ion transport",SYN,0.066,0.01570293398339475
+THRB_-_+,THRB (-),MORPH,"genomic regulation / 
+RNA processing",GR,0.051,0.09483698169000744
+THRB_-_+,THRB (-),MORPH,"neuron development / 
+morphogenesis",MORPH,0.949,0.8989381489912048
+THRB_-_+,THRB (-),MORPH,"synaptic transmission / 
+ion transport",SYN,0,0.006224869318787852
+IsoformM41_maroon,FMN2,GR,"genomic regulation / 
+RNA processing",GR,0.953,0.9429275794030051
+IsoformM41_maroon,FMN2,GR,"neuron development / 
+morphogenesis",MORPH,0.047,0.053038480761853864
+IsoformM41_maroon,FMN2,GR,"synaptic transmission / 
+ion transport",SYN,0,0.004033939835140971
+SOX11_+_+,SOX11 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.046,0.003701452273347417
+SOX11_+_+,SOX11 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.954,0.9954511047398807
+SOX11_+_+,SOX11 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0,8.474429867717513e-4
+LHX9_+_+,LHX9 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.043,0.004581557439845825
+LHX9_+_+,LHX9 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.957,0.9934281759788169
+LHX9_+_+,LHX9 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0,0.0019902665813373317
+SREBF2_(+),SREBF2 (+),GR,"genomic regulation / 
+RNA processing",GR,0.97,0.9970277663525103
+SREBF2_(+),SREBF2 (+),GR,"neuron development / 
+morphogenesis",MORPH,0.03,0.002534938968026551
+SREBF2_(+),SREBF2 (+),GR,"synaptic transmission / 
+ion transport",SYN,0,4.372946794634914e-4
+ZEB1_(+),ZEB1 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.017,0.019967578705992365
+ZEB1_(+),ZEB1 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.978,0.7715770115305121
+ZEB1_(+),ZEB1 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0.005,0.2084554097634955
+TCF4_(+),TCF4 (+),MORPH,"genomic regulation / 
+RNA processing",GR,0.019,0.05679688333347689
+TCF4_(+),TCF4 (+),MORPH,"neuron development / 
+morphogenesis",MORPH,0.981,0.9284128942457331
+TCF4_(+),TCF4 (+),MORPH,"synaptic transmission / 
+ion transport",SYN,0,0.014790222420790027
+IsoformM3_brown,PRKCE,SYN,"genomic regulation / 
+RNA processing",GR,0,0.002040092256896704
+IsoformM3_brown,PRKCE,SYN,"neuron development / 
+morphogenesis",MORPH,0.008,0.00190441976990175
+IsoformM3_brown,PRKCE,SYN,"synaptic transmission / 
+ion transport",SYN,0.992,0.9960554879732011
+M88-xx,FBXO41,SYN,"genomic regulation / 
+RNA processing",GR,0,2.937875652899904e-4
+M88-xx,FBXO41,SYN,"neuron development / 
+morphogenesis",MORPH,0.003,8.818181769093652e-4
+M88-xx,FBXO41,SYN,"synaptic transmission / 
+ion transport",SYN,0.997,0.9988243942578003
+MEF2C_+_+,MEF2C (+),SYN,"genomic regulation / 
+RNA processing",GR,0,2.468278831798557e-4
+MEF2C_+_+,MEF2C (+),SYN,"neuron development / 
+morphogenesis",MORPH,0.003,9.376126399135132e-4
+MEF2C_+_+,MEF2C (+),SYN,"synaptic transmission / 
+ion transport",SYN,0.997,0.9988155594769064
+IsoformM4_yellow,MARCH4,SYN,"genomic regulation / 
+RNA processing",GR,0,0.001206775232891581
+IsoformM4_yellow,MARCH4,SYN,"neuron development / 
+morphogenesis",MORPH,0.002,0.006485369374795762
+IsoformM4_yellow,MARCH4,SYN,"synaptic transmission / 
+ion transport",SYN,0.998,0.9923078553923128
+M84-gene,SRCIN1,SYN,"genomic regulation / 
+RNA processing",GR,0,0.0918915808748308
+M84-gene,SRCIN1,SYN,"neuron development / 
+morphogenesis",MORPH,0.001,0.007057407957140306
+M84-gene,SRCIN1,SYN,"synaptic transmission / 
+ion transport",SYN,0.999,0.9010510111680285

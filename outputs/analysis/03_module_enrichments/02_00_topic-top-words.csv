@@ -1,0 +1,11 @@
+SYN_prob,SYN_frex,SYN_lift,SYN_score,GR_prob,GR_frex,GR_lift,GR_score,MORPH_prob,MORPH_frex,MORPH_lift,MORPH_score
+synaptic,channel,camp,calcium,histone,acetyltransferase,methyltransferase,acetyltransferase,development,ligase,brain,ligase
+ion,gated,exocytosis,channel,mrna,methyltransferase,deubiquitinase,methyltransferase,differentiation,differentiation,smad,proliferation
+receptor,presynaptic,transmission,gated,transcription,deacetylase,mitochondrion,processing,neuron,morphogenesis,adp,dna
+calcium,transmission,zone,potassium,rna,processing,stability,nuclear,morphogenesis,proliferation,forebrain,specific
+transport,voltage,acetylcholine,presynaptic,acetyltransferase,hydrolytic,hydrolytic,deacetylase,transcription,translation,glial,translation
+vesicle,exocytosis,active,transmission,dna,mechanism,mechanism,splicing,dna,development,nucleosome,embryonic
+channel,potassium,adenylate,potential,nuclear,h3k4,snrnp,spliceosome,receptor,ribosomal,proliferation,stem
+development,action,alpha,action,receptor,nucleus,spliceosomal,repair,histone,subunit,cortex,specification
+postsynaptic,sodium,aminobutyric,voltage,transport,transcribed,acetyltransferase,dna,growth,actin,pattern,population
+potential,secretion,ampa,ion,polymerase,histone,processing,double,actin,beta,ligase,subunit
