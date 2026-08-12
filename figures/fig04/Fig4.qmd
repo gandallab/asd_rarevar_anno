@@ -17,36 +17,36 @@ Load data
 
 ```{r env}
 # Module SynGO & HotNet enrichment results
-df_module_hotnet_ora <- readRDS(file.path(analysis_dir, "05_MORPH_annotation", "05_00_module-HotNet-ORA.RDS"))
-df_module_syngo_ora <- readRDS(file.path(analysis_dir, "05_MORPH_annotation", "05_00_module-SynGO-ORA.RDS"))
+df_module_hotnet_ora <- readRDS(file.path(analysis_dir, "06_MORPH_annotation", "06_00_module-HotNet-ORA.RDS"))
+df_module_syngo_ora <- readRDS(file.path(analysis_dir, "06_MORPH_annotation", "06_00_module-SynGO-ORA.RDS"))
 
 # Module + stepwise data (for hub/TF bolding in the subcluster plot)
 df_module_kme   <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results
 
 # MORPH subclusters
-MORPH_net <- readRDS(file.path(analysis_dir, "05_MORPH_annotation", "05_01_MORPH-GO-similarity-graph.RDS"))
-df_MORPH_subclusters <- read_csv(file.path(analysis_dir, "05_MORPH_annotation", "05_01_MORPH-subcluster-by-GO-similarity.csv"),
+MORPH_net <- readRDS(file.path(analysis_dir, "06_MORPH_annotation", "06_01_MORPH-GO-similarity-graph.RDS"))
+df_MORPH_subclusters <- read_csv(file.path(analysis_dir, "06_MORPH_annotation", "06_01_MORPH-subcluster-by-GO-similarity.csv"),
                         show_col_types = FALSE)
 
 # GO similarity networks for every regulon with an ASD risk gene as its TF
 asd_tf_regulon_nets <- readRDS(
-    file.path(analysis_dir, "05_MORPH_annotation", "05_02_ASD-TF-regulon-GO-similarity-graphs.RDS")
+    file.path(analysis_dir, "06_MORPH_annotation", "06_02_ASD-TF-regulon-GO-similarity-graphs.RDS")
 )
 
 # Gene-network memberships (used to pull the MEF2C (+) regulon genes)
 #df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene-networks-all.RDS"))
 
 # Gene attributes for the MEF2C plot: GO topic (fill) + TADA stats (size / risk status)
-df_gene_assignments   <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"),
+df_gene_assignments   <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"),
                                   show_col_types = FALSE)
 df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
 
 # SynGO enrichments for every ASD-TF regulon
 df_syngo_res <- readRDS(
-    file.path(analysis_dir, "05_MORPH_annotation", "05_02_ASD-TF-regulon-SynGO-enrichment.RDS")
+    file.path(analysis_dir, "06_MORPH_annotation", "06_02_ASD-TF-regulon-SynGO-enrichment.RDS")
 )
 ```
 
@@ -89,8 +89,8 @@ sig_stroke_sizes <- c("FDR < 0.05" = 0.5, "p < 0.05" = 0.2)
 
 # --- Modules --- #
 
-# Which synaptic gene set definition is shown (04_00 section 1 computes all three), and
-# which programs the panel covers. GR is tested in 04_00 and reported in the supplement,
+# Which synaptic gene set definition is shown (05_00 section 1 computes all three), and
+# which programs the panel covers. GR is tested in 05_00 and reported in the supplement,
 # but is not part of the synaptic hypothesis this panel addresses
 syngo_set_shown   <- "Synapse (CC)"
 topic_order_panel <- c("SYN", "MORPH")
@@ -327,7 +327,7 @@ p_morph
 
 ```{r asd_tf_network, fig.height = 5, fig.width = 4}
 # Regulons shown in panels C and D. Every regulon with an ASD risk gene as its TF is
-# available in asd_tf_regulon_nets / df_syngo_res (see 04_02); list here the ones to plot
+# available in asd_tf_regulon_nets / df_syngo_res (see 05_02); list here the ones to plot
 regulons_to_plot <- c("MEF2C_+_+", "SOX11_+_+")
 
 regulon_labels <- df_stepwise_res %>%

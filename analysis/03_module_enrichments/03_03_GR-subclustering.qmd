@@ -15,14 +15,14 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+notebook_out_dir <- file.path(analysis_dir, "03_module_enrichments")
 ```
 
 ## 0.1 Load data
 
 ```{r load_data}
-# Gene-topic assignments (from notebook 02_02)
-df_gene_assignments <- read_csv(file.path(notebook_out_dir, "02_02_gene-topic-assignment.csv"))
+# Gene-topic assignments (from notebook 03_02)
+df_gene_assignments <- read_csv(file.path(notebook_out_dir, "03_02_gene-topic-assignment.csv"))
 
 # ASD rare variant statistics
 df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
@@ -51,7 +51,7 @@ go_mapping <- AnnotationDbi::select(
 # --- 1) GO cosine similarity hierarchical subclustering --- #
 
 ```{r GR_GO_similarity}
-# GR ASD gene list (defined in notebook 02_02)
+# GR ASD gene list (defined in notebook 03_02)
 GR_genes <- df_gene_assignments %>%
     filter(GO_topic == "GR") %>%
     pull(gene_name)
@@ -200,10 +200,10 @@ GR_cluster_assignments %>%
     summarise(n = n(), genes = paste(gene_name, collapse = ", "), .groups = "drop") %>%
     arrange(GR_cluster) %>%
     
-    write_csv(file.path(notebook_out_dir, "02_03_GR-subcluster-by-GO-similarity.csv"))
+    write_csv(file.path(notebook_out_dir, "03_03_GR-subcluster-by-GO-similarity.csv"))
 
 # Save graph objects for plot
-saveRDS(GR_net, file = file.path(notebook_out_dir, "02_03_GR-GO-similarity-graph.RDS"))
+saveRDS(GR_net, file = file.path(notebook_out_dir, "03_03_GR-GO-similarity-graph.RDS"))
 ```
 
 

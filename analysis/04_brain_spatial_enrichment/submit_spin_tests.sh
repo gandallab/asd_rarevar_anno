@@ -18,4 +18,4 @@ echo "submitted prep  : job $PREP"
 ARRAY=$(sbatch --parsable --dependency=afterok:$PREP spin_array.sbatch)
 echo "submitted array : job $ARRAY (starts after $PREP succeeds)"
 echo
-echo "results -> outputs/analysis/03_brain_spatial_enrichment/ as 03_01_ASD_* and 03_02_{SYN,GR,MORPH}_*"
+echo "results -> outputs/analysis/04_brain_spatial_enrichment/ as 04_01_ASD_* and 04_02_{SYN,GR,MORPH}_*"

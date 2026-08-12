@@ -16,7 +16,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "04_SynGO")
+notebook_out_dir <- file.path(analysis_dir, "05_SynGO")
 ```
 
 ## 0.1 Load data
@@ -43,8 +43,8 @@ df_asd_dnm <- read_tsv(
         dn_sibling = ptv_sibling + mis2_sibling + mis1_sibling #+ del_sibling + dup_sibling
     )
 
-# Gene–topic assignments (from 02_02)
-df_gene_assignments   <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+# Gene–topic assignments (from 03_02)
+df_gene_assignments   <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"))
 ```
 
 Load external gene sets
@@ -362,7 +362,7 @@ p_GO_topic_OR
 p_combined <- p_gene_set_OR + p_GO_topic_OR &
     plot_annotation(tag_levels = "A")
 ggsave(
-    file = file.path(figures_dir, "supplement", "04_00_gene-set-OR-vs-brain-bg.pdf"),
+    file = file.path(figures_dir, "supplement", "05_00_gene-set-OR-vs-brain-bg.pdf"),
     plot = p_combined,
     height = 3,
     width = 6.5,

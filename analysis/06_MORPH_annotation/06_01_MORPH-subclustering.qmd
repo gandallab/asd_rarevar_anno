@@ -21,8 +21,8 @@ notebook_out_dir <- file.path(analysis_dir, "04_MORPH_MEF2C")
 ## 0.1 Load data
 
 ```{r load_data}
-# Gene-topic assignments (from notebook 02_02)
-df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+# Gene-topic assignments (from notebook 03_02)
+df_gene_assignments <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"))
 
 # ASD rare variant statistics
 df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
@@ -169,10 +169,10 @@ MORPH_cluster_assignments %>%
     summarise(n = n(), genes = paste(gene_name, collapse = ", "), .groups = "drop") %>%
     arrange(MORPH_cluster) %>%
     
-    write_csv(file.path(notebook_out_dir, "05_01_MORPH-subcluster-by-GO-similarity.csv"))
+    write_csv(file.path(notebook_out_dir, "06_01_MORPH-subcluster-by-GO-similarity.csv"))
 
 # Save graph objects for plot
-saveRDS(MORPH_net, file = file.path(notebook_out_dir, "05_01_MORPH-GO-similarity-graph.RDS"))
+saveRDS(MORPH_net, file = file.path(notebook_out_dir, "06_01_MORPH-GO-similarity-graph.RDS"))
 ```
 
 

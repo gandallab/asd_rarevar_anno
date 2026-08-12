@@ -5,7 +5,7 @@ versioned here is external and published — supplementary tables, reference atl
 curated gene lists. Anything derived by our own code lives in `outputs/analysis/`, not
 here.
 
-Script numbers below (e.g. `03_01`) refer to the file-name prefixes of the notebooks in
+Script numbers below (e.g. `04_01`) refer to the file-name prefixes of the notebooks in
 `analysis/` modules.
 
 ---
@@ -24,8 +24,8 @@ them at the paths below to reproduce the analyses.
 | `DDID/Kaplanis_DDD_ASD_counts_by_gene_new_mis_cats_2025-04-09.txt` | Per-gene DNM counts from the Deciphering Developmental Disorders study, sex-stratified | Kaplanis et al., DDD |
 
 Used by: `00_01` (formats the TADA table into `00_01_ASD-rarevar-stats.RDS`, which most
-downstream analyses read instead of the raw file), `03_01`, `03_02`, `04_00`, `04_01`,
-`04_03`, `06_00`, `06_01`.
+downstream analyses read instead of the raw file), `04_01`, `04_02`, `05_00`, `05_01`,
+`05_03`, `07_00`, `07_01`.
 
 A few large files are also excluded for size rather than licensing — see `.gitignore`:
 `BrainSpan/expression_matrix.csv`, `Gandal2022/TableS3.xlsx`,
@@ -47,14 +47,14 @@ Allen Human Brain Atlas microarray, processed to a Desikan-Killiany region × ge
 - `ahba_dme_scores_in_dk.csv` — Dear et al. C1/C2/C3 transcriptomic gradient scores on DK;
   also fixes the 34-region parcel order the spin tests use
 - `lh.aparc.annot`, `rh.aparc.annot` — FreeSurfer DK labels on fsaverage (164k)
-- `abagen_data/` — raw donor archives (~6 GB, **not versioned**); re-downloaded by `03_00`
+- `abagen_data/` — raw donor archives (~6 GB, **not versioned**); re-downloaded by `04_00`
 
-Used by: `03_00` (builds the matrix), `03_01`, `03_02`, `03_05`, `dk_atlas_schematic`,
+Used by: `04_00` (builds the matrix), `04_01`, `04_02`, `04_05`, `dk_atlas_schematic`,
 `run_spin_test.py`. The three notebooks reach it through `spatial_helpers.AHBA_DIR`.
 
 ### `BrainSpan/`
 Developmental bulk RNA-seq (`expression_matrix.csv` plus row/column metadata and the
-BrainSpan `readme.txt`). Used by `02_04` for the prenatal expression trajectories.
+BrainSpan `readme.txt`). Used by `03_04` for the prenatal expression trajectories.
 
 ### `Gandal2022/`
 Cortical transcriptomic dysregulation in ASD.
@@ -64,23 +64,23 @@ Cortical transcriptomic dysregulation in ASD.
 - `TableS3.xlsx` — per-region ASD-vs-control differential expression (57 MB, **not
   versioned**)
 
-Used by: `03_02` §6 (convergence of risk-gene topography with transcriptomic attenuation).
+Used by: `04_02` §6 (convergence of risk-gene topography with transcriptomic attenuation).
 
 ### `SynGO/`
 `syngo_genes.xlsx`, `syngo_annotations.xlsx`, `syngo_ontologies.xlsx` — the SynGO synaptic
-gene ontology release. Used by `04_00`, `04_01`, `04_02`, `04_03`, `05_00`, `05_02`,
-`05_03`, `06_01`, and `figures/fig03/Fig3.qmd`.
+gene ontology release. Used by `05_00`, `05_01`, `05_02`, `05_03`, `06_00`, `06_02`,
+`06_03`, `07_01`, and `figures/fig03/Fig3.qmd`.
 
 ### `Tsyporin2026/`
 - `Supplementary_Table_5_GMs_shared.xlsx` — sensorimotor (S) and association (A) shared
   gene modules defining the areal-patterning axis
 - `MORPH_patterning_genes.xlsx` — patterning genes highlighted in the text
 
-Used by `03_03` (module enrichment for S/A areal-identity genes).
+Used by `04_03` (module enrichment for S/A areal-identity genes).
 
 ### `Wang2025/`
 `Wang2025_type_markers.csv`, `Wang2025_background_genes.csv`, `Wang2025_table_s3.xlsx` —
-cell-type marker sets. Used by `02_01_AUCell.R`.
+cell-type marker sets. Used by `03_01_AUCell.R`.
 
 ### `gene_annotations/`
 Published gene→category membership lists. Distinct from `networks/`: these assign genes to
@@ -90,7 +90,7 @@ a functional category, they do not encode gene-gene relationships.
 - `kepi_a_2139067_sm6382(1).xlsx` — epigenetic regulators, Engelen et al. 2023
   (doi:10.1080/15548627.2022.2139067), Supplementary Table S2
 
-Used by `04_00` (mutation-rate-matched enrichment vs a brain-expressed background).
+Used by `05_00` (mutation-rate-matched enrichment vs a brain-expressed background).
 
 ### `networks/`
 Published co-expression (WGCNA) and gene regulatory network module definitions — the
@@ -104,7 +104,7 @@ networks the whole project annotates. `Gandal2022_table_s5.xlsx`,
 
 ### Loose files
 - `gene_cds_length.csv` — union CDS length per gene, used as a covariate in the
-  gene-property-matched nulls in `03_01` and `03_02`
+  gene-property-matched nulls in `04_01` and `04_02`
 
 ---
 

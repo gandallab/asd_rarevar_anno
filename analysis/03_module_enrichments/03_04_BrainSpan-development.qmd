@@ -15,15 +15,15 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+notebook_out_dir <- file.path(analysis_dir, "03_module_enrichments")
 ```
 
 ```{r env}
 # ASD rare variant stats
 df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
 
-# Gene–topic assignments (from 02_02)
-df_gene_assignments   <- read_csv(file.path(notebook_out_dir, "02_02_gene-topic-assignment.csv"))
+# Gene–topic assignments (from 03_02)
+df_gene_assignments   <- read_csv(file.path(notebook_out_dir, "03_02_gene-topic-assignment.csv"))
 ```
 
 
@@ -220,7 +220,7 @@ df_traj_topic <- compute_traj_samples(
 For Fig 2f
 
 ```{r export_traj}
-saveRDS(df_traj_topic, file = file.path(notebook_out_dir, "02_04_brainspan-ASD-gene-trajectories.RDS"))
+saveRDS(df_traj_topic, file = file.path(notebook_out_dir, "03_04_brainspan-ASD-gene-trajectories.RDS"))
 ```
 
 
@@ -348,7 +348,7 @@ tstat_data <- list(
     "gene_tstats" = df_tstats,
     "topic_vs_background" = df_tstat_comparison
 )
-saveRDS(tstat_data, file.path(notebook_out_dir, "02_04_brainspan-prenatal-tstats.RDS"))
+saveRDS(tstat_data, file.path(notebook_out_dir, "03_04_brainspan-prenatal-tstats.RDS"))
 ```
 
 

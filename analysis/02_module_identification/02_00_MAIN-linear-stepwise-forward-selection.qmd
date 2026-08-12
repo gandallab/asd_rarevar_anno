@@ -15,7 +15,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "01_module_identification")
+notebook_out_dir <- file.path(analysis_dir, "02_module_identification")
 ```
 
 Load data
@@ -105,7 +105,7 @@ p_qq <- autoplot(example_model,
                  smooth.colour = "black")
 p_qq
 ggsave(
-    filename = file.path(figures_dir, "supplement", "01_00_M2-gene-model-diagnostics.png"), 
+    filename = file.path(figures_dir, "supplement", "02_00_M2-gene-model-diagnostics.png"), 
     plot = p_qq, 
     width = 6, 
     height = 5, 
@@ -383,7 +383,7 @@ l_stepwise_res <- list(
 
 ```{r save_res}
 output_path <- file.path(notebook_out_dir, 
-                         paste0("01_00_stepwise-linear-res-step1p", candidate_screen_p, 
+                         paste0("02_00_stepwise-linear-res-step1p", candidate_screen_p, 
                                 "-step2p", p_significance_threshold, 
                                 ".RDS")
 )
@@ -423,7 +423,7 @@ df_sig_mod_res <- df_final_res %>%
 # Write to xlsx
 df_sig_mod_res %>% 
     write_csv(file.path(notebook_out_dir, 
-                        paste0("01_00_sig-module-res-step1p", candidate_screen_p, 
+                        paste0("02_00_sig-module-res-step1p", candidate_screen_p, 
                                "-step2p", p_significance_threshold, 
                                ".csv"))
               )
@@ -433,7 +433,7 @@ df_sig_mod_res %>%
 
 ```{r marginal_stats_table}
 df_individual_assoc %>%
-    write_csv(file.path(notebook_out_dir, "01_00_marginal-stats-all-modules.csv"))
+    write_csv(file.path(notebook_out_dir, "02_00_marginal-stats-all-modules.csv"))
 ```
 
 ## 4.3 Co-expression modules whose top hub by kME is an ASD risk gene
@@ -466,7 +466,7 @@ df_hub_risk_genes <- df_module_kme %>%
         df_asd_rarevar_zscore %>% dplyr::select(ensembl_gene_id, TADA_FDR = FDR, TADA_BF = BF)
     )
 df_hub_risk_genes %>%
-    write_csv(file.path(notebook_out_dir, "01_00_module-hub-risk-genes.csv"))
+    write_csv(file.path(notebook_out_dir, "02_00_module-hub-risk-genes.csv"))
 ```
 
 
@@ -480,9 +480,9 @@ Compare the independently associated (selected) module set across STEP 1 (candid
 ```{r read_step1_sensitivity}
 # Read the three STEP 1 threshold runs; lm_results = final significant modules for each
 step1_files <- c(
-    "0.05"  = "01_00_stepwise-linear-res-step1p0.05-step2p0.001.RDS",
-    "0.01"  = "01_00_stepwise-linear-res-step1p0.01-step2p0.001.RDS",
-    "0.001" = "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS"
+    "0.05"  = "02_00_stepwise-linear-res-step1p0.05-step2p0.001.RDS",
+    "0.01"  = "02_00_stepwise-linear-res-step1p0.01-step2p0.001.RDS",
+    "0.001" = "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS"
 )
 
 df_step1_sensitivity <- imap_dfr(step1_files, function(file, step1_thresh) {
@@ -537,7 +537,7 @@ p_step1_sensitivity <- ggplot(df_step1_heatmap, aes(x = step1_threshold, y = mod
 p_step1_sensitivity
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "01_00_stepwise_linear_step1p_sensitivity.pdf"),
+    filename = file.path(figures_dir, "supplement", "02_00_stepwise_linear_step1p_sensitivity.pdf"),
     plot = p_step1_sensitivity,
     height = 5.5,
     width = 3.2,

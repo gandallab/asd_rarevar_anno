@@ -1,13 +1,13 @@
 # Collaborator script (Bert, CMU), rerun in place here. Only the file paths differ from
 # the version delivered to us: inputs now come from this project's data/ and outputs are
-# written to outputs/analysis/04_SynGO/ (tables) and outputs/figures/supplement/ (plots).
+# written to outputs/analysis/05_SynGO/ (tables) and outputs/figures/supplement/ (plots).
 rm(list=ls()); gc()
 options(stringsAsFactors = F)
 
 project_dir  <- path.expand("~/Documents/Postdoc/projects/ASD-rarevar-annot")
 data_dir     <- file.path(project_dir, "data")
 syngo_dir    <- file.path(data_dir, "SynGO")
-out_dir      <- file.path(project_dir, "outputs/analysis/04_SynGO")
+out_dir      <- file.path(project_dir, "outputs/analysis/05_SynGO")
 supp_fig_dir <- file.path(project_dir, "outputs/figures/supplement")
 
 require(data.table)
@@ -161,7 +161,7 @@ SYNGO.DF[["BP"]]$orig.order=1:nrow(SYNGO.DF[["BP"]])
 head(SYNGO.DF$BP)
 
 
-WriteXLS(SYNGO.DF,file.path(out_dir,"04_01_syngo-asc-summary.xlsx"))
+WriteXLS(SYNGO.DF,file.path(out_dir,"05_01_syngo-asc-summary.xlsx"))
 
 for(domain in c("BP","CC")){
   
@@ -177,10 +177,10 @@ for(domain in c("BP","CC")){
   SYNGO.DF[[domain]]=cbind.data.frame(SYNGO.DF[[domain]][,1:31],data.frame(ave.LOEUF=ave.loeuf),SYNGO.DF[[domain]][,32:40])
 }
 
-WriteXLS(SYNGO.DF,file.path(out_dir,paste0("04_01_syngo-asc-summary-incl-AVE-LOEUF-",Sys.Date(),".xlsx")))
+WriteXLS(SYNGO.DF,file.path(out_dir,paste0("05_01_syngo-asc-summary-incl-AVE-LOEUF-",Sys.Date(),".xlsx")))
 
 
-pdf(file.path(supp_fig_dir,paste0("04_01_Z-all-vs-ave-loeuf-",Sys.Date(),".pdf")),height=8,width=8)
+pdf(file.path(supp_fig_dir,paste0("05_01_Z-all-vs-ave-loeuf-",Sys.Date(),".pdf")),height=8,width=8)
 par(mfrow=c(2,1))
 par(mar=c(5,5,1,1))
 plot(SYNGO.DF[["BP"]]$Z.all,SYNGO.DF[["BP"]]$ave.LOEUF,xlab="Z.all",ylab="Average LOEUF",pch=20,col=viridis::viridis(9)[3],las=1,xlim=c(-5,15))
@@ -189,7 +189,7 @@ plot(SYNGO.DF[["CC"]]$Z.all,SYNGO.DF[["CC"]]$ave.LOEUF,xlab="Z.all",ylab="Averag
 legend("topright",legend="CC",bty="n",cex=1.5)
 dev.off()
 
-pdf(file.path(supp_fig_dir,"04_01_Z-score-vs-Entropy.pdf"),height=6,width=8)
+pdf(file.path(supp_fig_dir,"05_01_Z-score-vs-Entropy.pdf"),height=6,width=8)
 par(mfrow=c(1,2))
 plot(SYNGO.DF[["CC"]]$Z.all,SYNGO.DF[["CC"]]$HPro.all,pch=20,col="red",las=1,xlab="Z-score",ylab="Entropy",main="Cellular Components",ylim=c(0,6),xlim=c(0,14))
 re=lm(SYNGO.DF[["CC"]]$HPro.all~SYNGO.DF[["CC"]]$Z.all)

@@ -26,7 +26,6 @@ interpretation.
 │   ├── figures/     # Rendered figure PDFs/PNGs/SVGs
 │   └── tables/      # Submission-ready supplementary tables
 ├── data/            # Published source inputs (supp. tables, atlases, gene lists)
-├── cmu/             # Collaborator (CMU) working files for DNM/SynGO enrichments — reference only, not part of the reproducible pipeline
 ├── assets/          # Quarto CSS and static assets
 ├── index.qmd        # Quarto site home page
 └── _quarto.yml      # Quarto site configuration
@@ -37,11 +36,10 @@ interpretation.
 Each module follows a stepwise numbered layout. Common subdirectory patterns:
 `01_input_prep/`, `02_compute/`, `03_group_tests/`, `04_export/`.
 
-Within modules `02`–`07`, file-name prefixes are offset by one from the directory
-numbers (e.g. `02_module_identification/01_00_*`): the prefixes predate the insertion
-of `01_scdrs_trajectory` into the module order and are kept stable because scripts and
-outputs reference each other by these prefixes. `outputs/analysis/` subdirectories
-mirror the `analysis/` module numbering.
+File-name prefixes follow `<module>_<step>_<name>` (e.g.
+`02_module_identification/02_00_*`), so the first number always matches the module
+directory. `outputs/analysis/` subdirectories and their file prefixes mirror the same
+numbering.
 
 ### [`analysis/_shared/`](analysis/_shared/)
 
@@ -77,19 +75,18 @@ association testing.
 
 Stepwise conditional analysis to identify ASD rare-variant modules.
 
-- [`01_00_MAIN-linear-stepwise-forward-selection.qmd`](analysis/02_module_identification/01_00_MAIN-linear-stepwise-forward-selection.qmd) — main stepwise conditional analysis
-- [`01_01_conditional-LR-sensitivity.qmd`](analysis/02_module_identification/01_01_conditional-LR-sensitivity.qmd) — binomial (ASD gene binary) sensitivity analysis
+- [`02_00_MAIN-linear-stepwise-forward-selection.qmd`](analysis/02_module_identification/02_00_MAIN-linear-stepwise-forward-selection.qmd) — main stepwise conditional analysis
+- [`02_01_conditional-LR-sensitivity.qmd`](analysis/02_module_identification/02_01_conditional-LR-sensitivity.qmd) — binomial (ASD gene binary) sensitivity analysis
 
 ### [`analysis/03_module_enrichments/`](analysis/03_module_enrichments/)
 
 GO/topic-model enrichments and developmental trajectories for identified modules.
 
-- [`02_00_GO-enrichments-and-topic-modeling.qmd`](analysis/03_module_enrichments/02_00_GO-enrichments-and-topic-modeling.qmd) — module GO and cell-type enrichments, topic modeling
-- [`02_01_AUCell.R`](analysis/03_module_enrichments/02_01_AUCell.R) — score gene sets via AUCell
-- [`02_02_assign-genes-to-GO-topics.qmd`](analysis/03_module_enrichments/02_02_assign-genes-to-GO-topics.qmd) — assign genes to GO topics
-- [`02_03_GR-subclustering.qmd`](analysis/03_module_enrichments/02_03_GR-subclustering.qmd) — GR subclustering
-- [`02_04_BrainSpan-development.qmd`](analysis/03_module_enrichments/02_04_BrainSpan-development.qmd) — BrainSpan developmental trajectories
-- [`MIKE_AHBA_ASD_analysis.ipynb`](analysis/03_module_enrichments/MIKE_AHBA_ASD_analysis.ipynb) — Allen Human Brain Atlas follow-up analysis
+- [`03_00_GO-enrichments-and-topic-modeling.qmd`](analysis/03_module_enrichments/03_00_GO-enrichments-and-topic-modeling.qmd) — module GO and cell-type enrichments, topic modeling
+- [`03_01_AUCell.R`](analysis/03_module_enrichments/03_01_AUCell.R) — score gene sets via AUCell
+- [`03_02_assign-genes-to-GO-topics.qmd`](analysis/03_module_enrichments/03_02_assign-genes-to-GO-topics.qmd) — assign genes to GO topics
+- [`03_03_GR-subclustering.qmd`](analysis/03_module_enrichments/03_03_GR-subclustering.qmd) — GR subclustering
+- [`03_04_BrainSpan-development.qmd`](analysis/03_module_enrichments/03_04_BrainSpan-development.qmd) — BrainSpan developmental trajectories
 
 ### [`analysis/04_brain_spatial_enrichment/`](analysis/04_brain_spatial_enrichment/)
 
@@ -97,12 +94,12 @@ Cortical spatial enrichment of ASD risk genes and gene programs against the Alle
 Brain Atlas (AHBA), with spin-test significance (Alexander-Bloch permutations) and
 developmental follow-ups.
 
-- [`03_00_build-ahba-matrix.ipynb`](analysis/04_brain_spatial_enrichment/03_00_build-ahba-matrix.ipynb) — build the AHBA region × gene expression matrix
-- [`03_01_asd-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/03_01_asd-spatial-enrichment.ipynb) — ASD risk-gene cortical enrichment + spin tests
-- [`03_02_topic-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/03_02_topic-spatial-enrichment.ipynb) — GO-topic/program spatial enrichment, Gandal 2022 dysregulation comparison
-- [`03_03_tsyporin-SA-axis.qmd`](analysis/04_brain_spatial_enrichment/03_03_tsyporin-SA-axis.qmd) — sensorimotor–association axis overlap (Tsyporin patterning genes)
-- [`03_04_mubrain-developmental-enrichment.qmd`](analysis/04_brain_spatial_enrichment/03_04_mubrain-developmental-enrichment.qmd) — developmental (mubrain) spatial enrichment
-- [`03_05_module-spatial-maps.ipynb`](analysis/04_brain_spatial_enrichment/03_05_module-spatial-maps.ipynb) — per-module cortical maps and pairwise spatial correlations
+- [`04_00_build-ahba-matrix.ipynb`](analysis/04_brain_spatial_enrichment/04_00_build-ahba-matrix.ipynb) — build the AHBA region × gene expression matrix
+- [`04_01_asd-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/04_01_asd-spatial-enrichment.ipynb) — ASD risk-gene cortical enrichment + spin tests
+- [`04_02_topic-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/04_02_topic-spatial-enrichment.ipynb) — GO-topic/program spatial enrichment, Gandal 2022 dysregulation comparison
+- [`04_03_tsyporin-SA-axis.qmd`](analysis/04_brain_spatial_enrichment/04_03_tsyporin-SA-axis.qmd) — sensorimotor–association axis overlap (Tsyporin patterning genes)
+- [`04_04_mubrain-developmental-enrichment.qmd`](analysis/04_brain_spatial_enrichment/04_04_mubrain-developmental-enrichment.qmd) — developmental (mubrain) spatial enrichment
+- [`04_05_module-spatial-maps.ipynb`](analysis/04_brain_spatial_enrichment/04_05_module-spatial-maps.ipynb) — per-module cortical maps and pairwise spatial correlations
 - [`run_spin_test.py`](analysis/04_brain_spatial_enrichment/run_spin_test.py), [`maps_null_test.py`](analysis/04_brain_spatial_enrichment/maps_null_test.py), [`spatial_helpers.py`](analysis/04_brain_spatial_enrichment/spatial_helpers.py) — spin-test/null-model computation helpers
 - [`spin_prep.sbatch`](analysis/04_brain_spatial_enrichment/spin_prep.sbatch), [`spin_array.sbatch`](analysis/04_brain_spatial_enrichment/spin_array.sbatch), [`submit_spin_tests.sh`](analysis/04_brain_spatial_enrichment/submit_spin_tests.sh), [`spin.yml`](analysis/04_brain_spatial_enrichment/spin.yml), [`ahba.yml`](analysis/04_brain_spatial_enrichment/ahba.yml) — HPC job scripts and environments
 - [`dk_atlas_schematic.ipynb`](analysis/04_brain_spatial_enrichment/dk_atlas_schematic.ipynb) — Desikan-Killiany atlas schematic for figures
@@ -112,21 +109,21 @@ developmental follow-ups.
 SynGO/HotNet gene-set enrichment, partition rate-ratio tests, and AUCell correlation
 with scDRS.
 
-- [`04_00_gene-set-enrichments-vs-brain-background.qmd`](analysis/05_SynGO/04_00_gene-set-enrichments-vs-brain-background.qmd) — test gene sets for DNM enrichment vs. brain background
-- [`04_01_SynGO-MAIN.R`](analysis/05_SynGO/04_01_SynGO-MAIN.R) — main SynGO enrichment analysis
-- [`04_02_SynGO-HotNet-tree-prep.qmd`](analysis/05_SynGO/04_02_SynGO-HotNet-tree-prep.qmd) — SynGO HotNet trees (prep + BP plot)
-- [`04_03_independent-partition-rate-ratio.qmd`](analysis/05_SynGO/04_03_independent-partition-rate-ratio.qmd) — rate-ratio calculations on independent SynGO partitions
-- [`03_03_aucell/01_compute/`](analysis/05_SynGO/03_03_aucell/01_compute/) — score HotNet and topic gene sets via AUCell
-- [`03_03_aucell/02_group_tests/`](analysis/05_SynGO/03_03_aucell/02_group_tests/) — correlate HotNet and topic AUCell scores with scDRS scores
+- [`05_00_gene-set-enrichments-vs-brain-background.qmd`](analysis/05_SynGO/05_00_gene-set-enrichments-vs-brain-background.qmd) — test gene sets for DNM enrichment vs. brain background
+- [`05_01_SynGO-MAIN.R`](analysis/05_SynGO/05_01_SynGO-MAIN.R) — main SynGO enrichment analysis
+- [`05_02_SynGO-HotNet-tree-prep.qmd`](analysis/05_SynGO/05_02_SynGO-HotNet-tree-prep.qmd) — SynGO HotNet trees (prep + BP plot)
+- [`05_03_independent-partition-rate-ratio.qmd`](analysis/05_SynGO/05_03_independent-partition-rate-ratio.qmd) — rate-ratio calculations on independent SynGO partitions
+- [`05_04_aucell/01_compute/`](analysis/05_SynGO/05_04_aucell/01_compute/) — score HotNet and topic gene sets via AUCell
+- [`05_04_aucell/02_group_tests/`](analysis/05_SynGO/05_04_aucell/02_group_tests/) — correlate HotNet and topic AUCell scores with scDRS scores
 
 ### [`analysis/06_MORPH_annotation/`](analysis/06_MORPH_annotation/)
 
 MORPH subclustering and TF-regulon/MEF2C-focused module analyses.
 
-- [`05_00_module-HotNet-enrichments.qmd`](analysis/06_MORPH_annotation/05_00_module-HotNet-enrichments.qmd) — module HotNet and SynGO enrichment
-- [`05_01_MORPH-subclustering.qmd`](analysis/06_MORPH_annotation/05_01_MORPH-subclustering.qmd) — MORPH subclustering
-- [`05_02_ASD-TF-regulon-examples.qmd`](analysis/06_MORPH_annotation/05_02_ASD-TF-regulon-examples.qmd) — ASD TF regulon examples (incl. MEF2C)
-- [`05_03_module-plots.qmd`](analysis/06_MORPH_annotation/05_03_module-plots.qmd) — module network plots
+- [`06_00_module-HotNet-enrichments.qmd`](analysis/06_MORPH_annotation/06_00_module-HotNet-enrichments.qmd) — module HotNet and SynGO enrichment
+- [`06_01_MORPH-subclustering.qmd`](analysis/06_MORPH_annotation/06_01_MORPH-subclustering.qmd) — MORPH subclustering
+- [`06_02_ASD-TF-regulon-examples.qmd`](analysis/06_MORPH_annotation/06_02_ASD-TF-regulon-examples.qmd) — ASD TF regulon examples (incl. MEF2C)
+- [`06_03_module-plots.qmd`](analysis/06_MORPH_annotation/06_03_module-plots.qmd) — module network plots
 
 ### [`analysis/07_ddid_stratification/`](analysis/07_ddid_stratification/)
 
@@ -135,7 +132,7 @@ DD/ID comorbidity-stratified enrichment and burden analyses.
 - [`01_input_prep/`](analysis/07_ddid_stratification/01_input_prep/) — classify genes into DDID/NoDDID groups by per-proband rate and p_hat; save stratified gene lists for downstream scDRS
 - [`02_compute/`](analysis/07_ddid_stratification/02_compute/) — run DD/ID sensitivity scDRS
 - [`03_group_tests/`](analysis/07_ddid_stratification/03_group_tests/) — DD/ID sensitivity lineage group analysis
-- [`04_gene_set_DDID_stratification/`](analysis/07_ddid_stratification/04_gene_set_DDID_stratification/) — module-level (`06_00`) and SynGO-level (`06_01`) O/E DD/ID enrichment analyses
+- [`04_gene_set_DDID_stratification/`](analysis/07_ddid_stratification/04_gene_set_DDID_stratification/) — module-level (`07_00`) and SynGO-level (`07_01`) O/E DD/ID enrichment analyses
 
 Figure-specific plotting scripts are in [`figures/fig05/`](figures/fig05/).
 

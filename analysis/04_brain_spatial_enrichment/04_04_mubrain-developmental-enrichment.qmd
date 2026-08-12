@@ -13,7 +13,7 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 project_dir <- "~/Documents/Postdoc/projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
-results_dir  <- file.path(analysis_dir, "03_brain_spatial_enrichment")
+results_dir  <- file.path(analysis_dir, "04_brain_spatial_enrichment")
 supp_fig_dir <- file.path(figures_dir, "supplement")
 ```
 
@@ -24,9 +24,9 @@ supp_fig_dir <- file.path(figures_dir, "supplement")
 df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_01_ASD-rarevar-stats.RDS"))
 asd_genes <- df_asd_rarevar_zscore %>% filter(FDR < 0.001 & !FLAG) %>% pull(gene_name)
 
-# Gene-topic assignments (GR / SYN / MORPH), from 02_02
+# Gene-topic assignments (GR / SYN / MORPH), from 03_02
 df_gene_assignments <- read_csv(
-    file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"),
+    file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"),
     show_col_types = FALSE)
 gene_lists <- df_gene_assignments %>%
     split(.$GO_topic) %>%
@@ -190,7 +190,7 @@ write_xlsx(
         "A. transcriptome-wide bg" = df_region_enrich_bg,
         "B. ASD gene bg" = df_region_enrich_asd
     ),
-    path = file.path(results_dir, "03_04_mubrain-developmental-enrichment.xlsx"),
+    path = file.path(results_dir, "04_04_mubrain-developmental-enrichment.xlsx"),
 )
 ```
 
@@ -363,7 +363,7 @@ p_supp_fan_bg <- map(names(topic_colors),
 p_supp_fan_bg
 
 ggsave(
-    filename = file.path(supp_fig_dir, "03_04_mubrain-fan-transcriptome-bg.pdf"),
+    filename = file.path(supp_fig_dir, "04_04_mubrain-fan-transcriptome-bg.pdf"),
     plot     = p_supp_fan_bg,
     height   = 8,
     width    = 6,
@@ -382,7 +382,7 @@ p_supp_fan_asd <- map(names(topic_colors),
 p_supp_fan_asd
 
 ggsave(
-    filename = file.path(supp_fig_dir, "03_04_mubrain-fan-ASD-bg.pdf"),
+    filename = file.path(supp_fig_dir, "04_04_mubrain-fan-ASD-bg.pdf"),
     plot     = p_supp_fan_asd,
     height   = 8,
     width    = 6,

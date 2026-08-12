@@ -19,7 +19,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+notebook_out_dir <- file.path(analysis_dir, "03_module_enrichments")
 ```
 
 ## 0.1 Load study data
@@ -30,15 +30,15 @@ df_asd_rarevar_zscore <- readRDS(file.path(analysis_dir, "00_data_format", "00_0
 
 # Significant ASD modules
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results %>% 
     mutate(module_label = factor(module_label, levels = unique(.$module_label)))
 
 # Module GO enrichments
-df_go_res <- readRDS(file.path(notebook_out_dir, "02_00_sig-mod-GO-enrichments.RDS"))
+df_go_res <- readRDS(file.path(notebook_out_dir, "03_00_sig-mod-GO-enrichments.RDS"))
 
 # Module-topic gamma
-df_gamma <- readRDS(file.path(notebook_out_dir, "02_00_topic-module-gamma.RDS"))
+df_gamma <- readRDS(file.path(notebook_out_dir, "03_00_topic-module-gamma.RDS"))
 ```
 
 ## 0.2 Load GO data
@@ -285,7 +285,7 @@ df_gene_assignments <- gene_topic_final %>%
 ```{r export_table}
 # Export as table for supplement
 df_gene_assignments %>% 
-    write_csv(file.path(notebook_out_dir, "02_02_gene-topic-assignment.csv"))
+    write_csv(file.path(notebook_out_dir, "03_02_gene-topic-assignment.csv"))
 ```
 
 

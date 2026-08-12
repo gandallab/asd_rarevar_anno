@@ -17,8 +17,8 @@
 #                                                    (<prefix>occipital_focal_*.csv)
 #     per-region      : spin-corrected enrichment for every cortical region
 #                       (separate mode over all regions) (<prefix>cortex_perregion_*.csv)
-# All tasks write into one flat outputs/analysis/03_brain_spatial_enrichment/, kept apart
-# by --prefix naming the notebook that consumes them: 03_01_ for ASD, 03_02_ for the topics.
+# All tasks write into one flat outputs/analysis/04_brain_spatial_enrichment/, kept apart
+# by --prefix naming the notebook that consumes them: 04_01_ for ASD, 04_02_ for the topics.
 # 4 gene sets x 6 tests = 24 permutation tests. The 4 correlations come out of a
 # single run (they share the gradient nulls), so the natural array unit is the
 # gene set; occipital (union) and per-region (separate) are two run_spin_test
@@ -37,11 +37,11 @@ export PYTHONUNBUFFERED=1     # stream progress to the log live instead of block
 
 # gene set for this array index, and its regional-enrichment map
 GENE_SETS=(ASD SYN GR MORPH)
-PREFIXES=(03_01_ASD_ 03_02_SYN_ 03_02_GR_ 03_02_MORPH_)
+PREFIXES=(04_01_ASD_ 04_02_SYN_ 04_02_GR_ 04_02_MORPH_)
 GS=${GENE_SETS[$SLURM_ARRAY_TASK_ID]}
 PREFIX=${PREFIXES[$SLURM_ARRAY_TASK_ID]}
-# project root is three levels up from code/analysis/03_brain_spatial_enrichment
-OUT=$(cd ../../.. && pwd)/outputs/analysis/03_brain_spatial_enrichment
+# project root is three levels up from code/analysis/04_brain_spatial_enrichment
+OUT=$(cd ../../.. && pwd)/outputs/analysis/04_brain_spatial_enrichment
 MAP=$OUT/${PREFIX}regional_enrichment.csv
 mkdir -p "$OUT"
 echo "[task $SLURM_ARRAY_TASK_ID] gene set=$GS  map=$MAP"

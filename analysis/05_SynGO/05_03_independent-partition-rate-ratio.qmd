@@ -16,7 +16,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "04_SynGO")
+notebook_out_dir <- file.path(analysis_dir, "05_SynGO")
 ```
 
 ## 0.1 Load data
@@ -270,7 +270,7 @@ p_rr <- (p_matrix | p_dots) +
           legend.text = element_text(size = 5), legend.margin = margin(l = -5))
 p_rr
 
-ggsave(file.path(figures_dir, "supplement", "04_03_SynGO-BP-partition-RR.pdf"),
+ggsave(file.path(figures_dir, "supplement", "05_03_SynGO-BP-partition-RR.pdf"),
        p_rr, height = 2.5, width = 4.5, dpi = 300)
 ```
 

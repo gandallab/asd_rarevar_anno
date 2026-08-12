@@ -15,7 +15,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set output directory for notebook analysis
-notebook_out_dir <- file.path(analysis_dir, "06_gene_set_DDID_stratification")
+notebook_out_dir <- file.path(analysis_dir, "07_ddid_stratification")
 ```
 
 Load data
@@ -30,11 +30,11 @@ df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-exp
 
 # Significant modules from stepwise conditional analysis
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results
 
 # Module topic assignments (top topic per module, with colors)
-df_module_topics <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-module-gamma.RDS")) %>%
+df_module_topics <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_00_topic-module-gamma.RDS")) %>%
     filter(top_topic == "yes") %>%
     select(module, topic_label, topic_color)
 
@@ -110,7 +110,7 @@ Extract gene members for each significant module from `df_network_data`
 ```{r build_gene_sets}
 # Full individual-association stats (used to annotate each module's tier)
 df_all_module_stats <- read_csv(
-    file.path(analysis_dir, "01_module_identification", "01_00_marginal-stats-all-modules.csv")
+    file.path(analysis_dir, "02_module_identification", "02_00_marginal-stats-all-modules.csv")
 ) %>%
     clean_names()
 
@@ -209,7 +209,7 @@ cohort_spec <- tribble(
 )
 
 # O/E for EVERY module (loops over ~1,150 modules, so it's cached)
-oe_cache <- file.path(notebook_out_dir, "06_00_all-modules-OE.RDS")
+oe_cache <- file.path(notebook_out_dir, "07_00_all-modules-OE.RDS")
 
 if (file.exists(oe_cache)) {
     df_oe_all <- readRDS(oe_cache)
@@ -281,7 +281,7 @@ cohort_pairs <- list(
 
 # Pairwise comparisons for EVERY module (cached). FDR is corrected across all modules
 # and cohort contrasts; the stepwise subset (df_pairwise) is derived below for 1.6.
-pairwise_cache <- file.path(notebook_out_dir, "06_00_all-modules-pairwise-RR.RDS")
+pairwise_cache <- file.path(notebook_out_dir, "07_00_all-modules-pairwise-RR.RDS")
 
 if (file.exists(pairwise_cache)) {
     df_pairwise_all <- readRDS(pairwise_cache)
@@ -319,11 +319,11 @@ if (file.exists(pairwise_cache)) {
 ```{r export_tables}
 df_oe_all %>%
     arrange(study, module, cohort) %>%
-    write_csv(file.path(notebook_out_dir, "06_00_module_OE_ratios.csv"))
+    write_csv(file.path(notebook_out_dir, "07_00_module_OE_ratios.csv"))
 
 df_pairwise_all %>%
     arrange(study, module, comparison) %>%
-    write_csv(file.path(notebook_out_dir, "06_00_module_cohort_pairwise.csv"))
+    write_csv(file.path(notebook_out_dir, "07_00_module_cohort_pairwise.csv"))
 ```
 
 
@@ -459,13 +459,13 @@ df_go_res <- pmap_dfr(
 ```
 
 ```{r export_go}
-saveRDS(df_go_res, file.path(analysis_dir, "06_gene_set_DDID_stratification",
-                             "06_00_ASD-DA-biased-GO-enrichments.RDS"))
+saveRDS(df_go_res, file.path(analysis_dir, "07_ddid_stratification",
+                             "07_00_ASD-DA-biased-GO-enrichments.RDS"))
 
 df_go_res %>%
     filter(p_value < 0.05) %>%
-    write_csv(file.path(analysis_dir, "06_gene_set_DDID_stratification",
-                         "06_00_ASD-DA-biased-GO-enrichments.csv"))
+    write_csv(file.path(analysis_dir, "07_ddid_stratification",
+                         "07_00_ASD-DA-biased-GO-enrichments.csv"))
 ```
 
 ## 2.3 Top GO terms per module (not currently included in supp mat)
@@ -959,7 +959,7 @@ p_module_ddid_combined <- row_top / row_bottom +
 p_module_ddid_combined
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "06_00_module-DDID-OE-enrichment.pdf"),
+    filename = file.path(figures_dir, "supplement", "07_00_module-DDID-OE-enrichment.pdf"),
     plot  = p_module_ddid_combined,
     height    = 7,
     width     = 7.09,
@@ -1203,12 +1203,12 @@ f_save_plot(
 ## Load data
 
 # Significant modules
-df_pairwise <- read_xlsx(file.path(analysis_dir, "06_gene_set_DDID_stratification", "06_00_module_cohort_pairwise.xlsx"))
-df_oe <- read_xlsx(file.path(analysis_dir, "06_gene_set_DDID_stratification", "06_00_module_OE_ratios.xlsx"))
+df_pairwise <- read_xlsx(file.path(analysis_dir, "07_ddid_stratification", "07_00_module_cohort_pairwise.xlsx"))
+df_oe <- read_xlsx(file.path(analysis_dir, "07_ddid_stratification", "07_00_module_OE_ratios.xlsx"))
 
 # All modules
-df_oe_all <- readRDS(file.path(analysis_dir, "06_gene_set_DDID_stratification", "06_00_all-modules-OE.RDS"))
-df_pairwise_all <- readRDS(file.path(analysis_dir, "06_gene_set_DDID_stratification", "06_00_all-modules-pairwise.RDS"))
+df_oe_all <- readRDS(file.path(analysis_dir, "07_ddid_stratification", "07_00_all-modules-OE.RDS"))
+df_pairwise_all <- readRDS(file.path(analysis_dir, "07_ddid_stratification", "07_00_all-modules-pairwise.RDS"))
 
 # Set colors and labels
 cohort_labels <- c(
@@ -1266,7 +1266,7 @@ write_xlsx(
         "A. All module OE ratios" = df_oe_all,
         "B. All module pairwise RRs" = df_pairwise_all %>% filter(!str_detect(module, "M0_grey")) %>% arrange(p_fdr)
     ),
-    path = file.path(analysis_dir, "06_gene_set_DDID_stratification", "06_00_all-module-OE-ratios.xlsx")
+    path = file.path(analysis_dir, "07_ddid_stratification", "07_00_all-module-OE-ratios.xlsx")
 )
 ```
 

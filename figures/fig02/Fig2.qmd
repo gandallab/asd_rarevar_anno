@@ -21,40 +21,40 @@ df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-exp
 
 # ASD module association statistics
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results %>% 
     mutate(module = factor(module, levels = unique(.$module)))
 
 # GO topic model results (spectral fit)
-topic_model <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-model-K3.RDS"))
-df_gamma <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-module-gamma.RDS"))
-df_beta <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-word-beta.RDS"))
+topic_model <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_00_topic-model-K3.RDS"))
+df_gamma <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_00_topic-module-gamma.RDS"))
+df_beta <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_00_topic-word-beta.RDS"))
 
 # Restart stability of the topic model
 topic_stability <- readRDS(
-    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+    file.path(analysis_dir, "03_module_enrichments", "03_00_topic-restart-stability.RDS")
 )
 df_assignment_prop <- topic_stability$assignment_prop
 
 # AUCell results
 aucell_high_prop_pct <- read.csv(
-    file.path(analysis_dir, "02_module_enrichments", "02_01_AUCell", "high_proportion_pct.csv"),
+    file.path(analysis_dir, "03_module_enrichments", "03_01_AUCell", "high_proportion_pct.csv"),
     row.names = 1, check.names = FALSE
 )
 
 # Gene-topic assignments
-df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+df_gene_assignments <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"))
 
 # GR subclusters
-GR_net <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_03_GR-GO-similarity-graph.RDS"))
-df_GR_subclusters <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_03_GR-subcluster-by-GO-similarity.csv"),
+GR_net <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_03_GR-GO-similarity-graph.RDS"))
+df_GR_subclusters <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_03_GR-subcluster-by-GO-similarity.csv"),
                         show_col_types = FALSE)
 
 # BrainSpan trajectories
-df_traj_topic <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_04_brainspan-ASD-gene-trajectories.RDS"))
+df_traj_topic <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_04_brainspan-ASD-gene-trajectories.RDS"))
 
 # BrainSpan prenatal t-stats
-tstat_data <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_04_brainspan-prenatal-tstats.RDS"))
+tstat_data <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_04_brainspan-prenatal-tstats.RDS"))
 df_tstats <- tstat_data$gene_tstats
 df_tstat_comparison <- tstat_data$topic_vs_background
 ```

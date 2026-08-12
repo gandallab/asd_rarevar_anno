@@ -4,8 +4,8 @@
 # NOTE: This script needs be run on an HPC cluster! 
 # Run using the following code:
 # sbatch --job-name=AUCell --mem=128G --cpus-per-task=4 --time=8:00:00 \
-# --output=/mnt/isilon/gandal_lab/smithr30/ASD-rarevar-annot/outputs/analysis/02_module_enrichments/02_01_AUCell/AUCell_run_%j.log \
-# --wrap="bash -lc 'module load R/4.5.1 && Rscript /mnt/isilon/gandal_lab/smithr30/ASD-rarevar-annot/code/analysis/02_module_enrichments/02_01_AUCell.R'"
+# --output=/mnt/isilon/gandal_lab/smithr30/ASD-rarevar-annot/outputs/analysis/03_module_enrichments/03_01_AUCell/AUCell_run_%j.log \
+# --wrap="bash -lc 'module load R/4.5.1 && Rscript /mnt/isilon/gandal_lab/smithr30/ASD-rarevar-annot/code/analysis/03_module_enrichments/03_01_AUCell.R'"
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
@@ -23,7 +23,7 @@ out_dir       <- file.path(project_dir, "outputs/")
 wang_data_dir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/SnMultiome_Wang2025/"
 
 # All AUCell outputs (final CSVs + intermediate .rds caches) live here
-aucdir        <- file.path(out_dir, "analysis", "02_module_enrichments", "02_01_AUCell/")
+aucdir        <- file.path(out_dir, "analysis", "03_module_enrichments", "03_01_AUCell/")
 dir.create(aucdir, recursive = TRUE, showWarnings = FALSE)
 
 
@@ -36,7 +36,7 @@ df_network_data <- readRDS(file.path(out_dir, "analysis", "00_data_format", "00_
 
 # Significant ASD modules
 df_stepwise_res <- readRDS(
-    file.path(out_dir, "analysis", "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(out_dir, "analysis", "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results %>% 
     mutate(module_label = factor(module_label, levels = unique(.$module_label)))
 

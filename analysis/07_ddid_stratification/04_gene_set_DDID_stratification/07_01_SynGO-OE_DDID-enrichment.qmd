@@ -15,7 +15,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set output directory for notebook analysis
-notebook_out_dir <- file.path(analysis_dir, "06_gene_set_DDID_stratification")
+notebook_out_dir <- file.path(analysis_dir, "07_ddid_stratification")
 ```
 
 ```{r load_data}
@@ -197,7 +197,7 @@ cohort_spec <- tribble(
 
 # Run analysis across all cohorts for each pathway
 # Load from cache if it's already been run
-oe_cache <- file.path(notebook_out_dir, "06_01_SynGO-OE.RDS")
+oe_cache <- file.path(notebook_out_dir, "07_01_SynGO-OE.RDS")
 
 if (file.exists(oe_cache)) {
     df_oe_syngo <- readRDS(oe_cache)
@@ -266,7 +266,7 @@ cohort_pairs <- list(
 
 # Run analysis across all pairwise combinations of cohorts
 # Load from cache if it's already been run
-pairwise_cache <- file.path(notebook_out_dir, "06_01_SynGO-pairwise-RR.RDS")
+pairwise_cache <- file.path(notebook_out_dir, "07_01_SynGO-pairwise-RR.RDS")
 
 if (file.exists(pairwise_cache)) {
     df_pairwise_syngo <- readRDS(pairwise_cache)
@@ -302,11 +302,11 @@ if (file.exists(pairwise_cache)) {
 ```{r export_tables}
 df_oe_syngo %>%
     arrange(cohort, p) %>%
-    write_csv(file.path(notebook_out_dir, "06_01_SynGO_OE_ratios.csv"))
+    write_csv(file.path(notebook_out_dir, "07_01_SynGO_OE_ratios.csv"))
 
 df_pairwise_syngo %>%
     arrange(comparison, p) %>%
-    write_csv(file.path(notebook_out_dir, "06_01_SynGO_cohort_pairwise_RR.csv"))
+    write_csv(file.path(notebook_out_dir, "07_01_SynGO_cohort_pairwise_RR.csv"))
 ```
 
 
@@ -406,7 +406,7 @@ cat(sprintf(
 ```{r oe_per_pathway_go}
 # Run analysis across all cohorts for each pathway
 # Load from cache if it's already been run
-oe_cache <- file.path(notebook_out_dir, "06_01_all-GO-OE.RDS")
+oe_cache <- file.path(notebook_out_dir, "07_01_all-GO-OE.RDS")
 
 if (file.exists(oe_cache)) {
     df_oe_go <- readRDS(oe_cache)
@@ -462,7 +462,7 @@ if (file.exists(oe_cache)) {
 ```{r cohort_pairs_go}
 # Run analysis across all pairwise combinations of cohorts
 # Load from cache if it's already been run
-pairwise_cache <- file.path(notebook_out_dir, "06_01_all-GO-pairwise-RR.RDS")
+pairwise_cache <- file.path(notebook_out_dir, "07_01_all-GO-pairwise-RR.RDS")
 
 if (file.exists(pairwise_cache)) {
     df_pairwise_go <- readRDS(pairwise_cache)
@@ -717,7 +717,7 @@ p_syngo_ddid_combined <- p_syngo_scatter / free(p_go_scatter) +
 p_syngo_ddid_combined
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "06_01_SynGO-DDID-OE-enrichment.pdf"),
+    filename = file.path(figures_dir, "supplement", "07_01_SynGO-DDID-OE-enrichment.pdf"),
     plot  = p_syngo_ddid_combined,
     height    = 6,
     width     = 7.09,
@@ -930,20 +930,20 @@ f_save_plot(
 
 ```{r export_syngo_tables}
 df_oe_syngo %>%
-    write_xlsx(file.path(notebook_out_dir, "06_02_syngo_OE_ratios.xlsx"))
+    write_xlsx(file.path(notebook_out_dir, "07_02_syngo_OE_ratios.xlsx"))
 
 df_pairwise_syngo %>%
-    write_xlsx(file.path(notebook_out_dir, "06_02_syngo_cohort_pairwise.xlsx"))
+    write_xlsx(file.path(notebook_out_dir, "07_02_syngo_cohort_pairwise.xlsx"))
 ```
 
 ## 4.2 GO interim tables
 
 ```{r export_go_tables}
 df_oe_go %>%
-    write_xlsx(file.path(notebook_out_dir, "06_02_go_OE_ratios.xlsx"))
+    write_xlsx(file.path(notebook_out_dir, "07_02_go_OE_ratios.xlsx"))
 
 df_pairwise_go %>%
-    write_xlsx(file.path(notebook_out_dir, "06_02_go_cohort_pairwise.xlsx"))
+    write_xlsx(file.path(notebook_out_dir, "07_02_go_cohort_pairwise.xlsx"))
 ```
 
 ## 4.3 Manuscript tables
@@ -954,7 +954,7 @@ write_xlsx(
         "A. SynGO pathway OE ratios" = df_oe_syngo,
         "B. SynGO pathway pairwise RRs" = df_pairwise_syngo
     ),
-    path = file.path(notebook_out_dir, "06_02_all-SynGO-OE-ratios.xlsx")
+    path = file.path(notebook_out_dir, "07_02_all-SynGO-OE-ratios.xlsx")
 )
 
 write_xlsx(
@@ -962,7 +962,7 @@ write_xlsx(
         "A. GO pathway OE ratios (p < 0.05)" = df_oe_go %>% filter(p < 0.05),
         "B. GO pathway pairwise RRs (p < 0.05)" = df_pairwise_go %>% arrange(p_fdr) %>% filter(p < 0.05)
     ),
-    path = file.path(notebook_out_dir, "06_02_all-GO-OE-ratios.xlsx")
+    path = file.path(notebook_out_dir, "07_02_all-GO-OE-ratios.xlsx")
 )
 ```
 

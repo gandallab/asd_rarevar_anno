@@ -14,13 +14,13 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set output directory for this notebook
-notebook_out_dir <- file.path(analysis_dir, "05_MORPH_annotation")
+notebook_out_dir <- file.path(analysis_dir, "06_MORPH_annotation")
 ```
 
 ```{r env}
 # ASD-associated modules
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results
 
 # Genes in each module
@@ -28,13 +28,13 @@ df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene
 
 # Module-topic assignments (restart stability of the topic model)
 topic_stability <- readRDS(
-    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+    file.path(analysis_dir, "03_module_enrichments", "03_00_topic-restart-stability.RDS")
 )
 df_top_topic <- topic_stability$consensus %>% 
     dplyr::select(module, topic_label = consensus_topic)
 
-# SynGO HotNet gene sets (from 03_01)
-hotnet_gene_lists <- readRDS(file.path(analysis_dir, "04_SynGO", "04_02_hotnet-gene-lists.RDS"))
+# SynGO HotNet gene sets (from 04_01)
+hotnet_gene_lists <- readRDS(file.path(analysis_dir, "05_SynGO", "05_02_hotnet-gene-lists.RDS"))
 
 # SynGO ontology background
 syngo_dir <- file.path(data_dir, "SynGO")
@@ -74,7 +74,7 @@ Both sections use two-sided tests so that odds ratios come with finite confidenc
 intervals; a one-sided test returns an infinite upper bound by construction.
 
 Background: the module side is that study's network genes, and the gene-set side is the
-HPA brain-expressed list used in 03_00; `ORA_fisher()` intersects the two, so each module
+HPA brain-expressed list used in 04_00; `ORA_fisher()` intersects the two, so each module
 is compared against other brain-expressed genes *in its own network* and never against
 the genome. Restricting to brain-expressed genes is what guards against the standard
 confound that synaptic genes are brain-expressed, and it keeps the baseline synaptic rate
@@ -134,7 +134,7 @@ cat(sprintf("  CC and BP overlap: %d | CC only: %d | BP only: %d\n",
             length(setdiff(synaptic_gene_sets[[2]], synaptic_gene_sets[[1]]))))
 
 # Brain-expressed background, as HGNC symbols to match gene_name in the network data.
-# Every SynGO gene is force-included (as in 03_00) so that a synaptic gene missing from
+# Every SynGO gene is force-included (as in 04_00) so that a synaptic gene missing from
 # the HPA list is not dropped, and so that all three tests share one identical universe
 brain_background <- union(df_brain$gene, syngo_gene_set)
 
@@ -193,7 +193,7 @@ df_module_syngo_ora %>%
 
 ```{r save_module_syngo_ora}
 saveRDS(df_module_syngo_ora,
-        file.path(notebook_out_dir, "05_00_module-SynGO-ORA.RDS")
+        file.path(notebook_out_dir, "06_00_module-SynGO-ORA.RDS")
 )
 ```
 
@@ -259,7 +259,7 @@ print(df_module_hotnet_ora %>% filter(p_value < 0.05))
 
 ```{r save_module_hotnet_ora}
 saveRDS(df_module_hotnet_ora, 
-        file.path(notebook_out_dir, "05_00_module-HotNet-ORA.RDS")
+        file.path(notebook_out_dir, "06_00_module-HotNet-ORA.RDS")
 )
 ```
 
@@ -269,11 +269,11 @@ saveRDS(df_module_hotnet_ora,
 ```{r export_tables}
 write_csv(
     df_module_syngo_ora,
-    file = file.path(notebook_out_dir, "05_00_module-SynGO-ORA.csv")
+    file = file.path(notebook_out_dir, "06_00_module-SynGO-ORA.csv")
 )
 write_csv(
     df_module_hotnet_ora,
-    file = file.path(notebook_out_dir, "05_00_module-HotNet-ORA.csv")
+    file = file.path(notebook_out_dir, "06_00_module-HotNet-ORA.csv")
 )
 ```
 

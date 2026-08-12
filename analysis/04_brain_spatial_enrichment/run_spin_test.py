@@ -22,7 +22,7 @@ per-region enrichment). This keeps a single industry-standard
 
 Run from this directory (which holds maps_null_test.py). Default paths are resolved from
 this file's location: data from `<project>/data/AHBA/`, results and caches under
-`<project>/outputs/analysis/03_brain_spatial_enrichment/`, e.g.:
+`<project>/outputs/analysis/04_brain_spatial_enrichment/`, e.g.:
     python run_spin_test.py --n-spin 1000
     python run_spin_test.py --n-spin 5000 --density 41k      # 41k needs wb_command
     python run_spin_test.py --n-spin 1000 --force            # ignore cache, regenerate
@@ -71,7 +71,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # project root, so the defaults below hold wherever the job is launched from
 PROJ = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 AHBA = f"{PROJ}/data/AHBA"
-ANALYSIS = f"{PROJ}/outputs/analysis/03_brain_spatial_enrichment"
+ANALYSIS = f"{PROJ}/outputs/analysis/04_brain_spatial_enrichment"
 
 
 def parse_args():
@@ -87,7 +87,7 @@ def parse_args():
     p.add_argument("--seed", type=int, default=0, help="RNG seed for the spins (reproducibility)")
     p.add_argument("--scores", default=f"{AHBA}/ahba_dme_scores_in_dk.csv",
                    help="Dear et al. gradient scores on DK (index = lh_<region>; cols C1,C2,C3)")
-    p.add_argument("--asd-map", default=f"{ANALYSIS}/03_01_ASD_regional_enrichment.csv",
+    p.add_argument("--asd-map", default=f"{ANALYSIS}/04_01_ASD_regional_enrichment.csv",
                    help="ASD regional enrichment table (must contain a 'region' column + --asd-col)")
     p.add_argument("--asd-cols", nargs="+", default=["z_vs_bg", "obs"],
                    help="one or more columns of --asd-map to spin-test as maps, in one job "
@@ -109,7 +109,7 @@ def parse_args():
     p.add_argument("--outdir", default=ANALYSIS)
     p.add_argument("--prefix", default="",
                    help="prefix for the output filenames, identifying the notebook and gene set "
-                        "that the tested map came from (e.g. 03_01_ASD_, 03_02_GR_). Results from every "
+                        "that the tested map came from (e.g. 04_01_ASD_, 04_02_GR_). Results from every "
                         "gene set share one flat --outdir, so this is what keeps them apart.")
     p.add_argument("--cachedir", default=f"{ANALYSIS}/spin_cache",
                    help="where spins/nulls are cached and reused across runs")

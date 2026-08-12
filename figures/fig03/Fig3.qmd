@@ -24,14 +24,14 @@ df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-exp
 
 # Significant ASD modules
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results
 
-# CC HotNet tree (built + labeled in 03_01)
-g_cc <- readRDS(file.path(analysis_dir, "04_SynGO", "04_02_CC-hotnet-graph.RDS"))
+# CC HotNet tree (built + labeled in 04_01)
+g_cc <- readRDS(file.path(analysis_dir, "05_SynGO", "05_02_CC-hotnet-graph.RDS"))
 
 # Genes assigned to each HotNet
-hotnet_gene_lists <- readRDS(file.path(analysis_dir, "04_SynGO", "04_02_hotnet-gene-lists.RDS"))
+hotnet_gene_lists <- readRDS(file.path(analysis_dir, "05_SynGO", "05_02_hotnet-gene-lists.RDS"))
 
 # Synaptic proteomics enrichments
 df_syn_prot <- read_xlsx(file.path(data_dir, "proteomics", "synaptic_proteomics_enrichments.xlsx"))
@@ -43,7 +43,7 @@ df_syn_prot <- read_xlsx(file.path(data_dir, "proteomics", "synaptic_proteomics_
 Revise to synapse graphic in illustrator
 
 ```{r panel_a, fig.width = 7.09, fig.height = 6.69}
-# g_cc is loaded (built + labeled in 03_01)
+# g_cc is loaded (built + labeled in 04_01)
 
 # Extract layout to enable geom_mark_ellipse (needs explicit x/y data)
 layout_cc <- ggraph::create_layout(g_cc, layout = "tree")

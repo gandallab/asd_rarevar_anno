@@ -15,7 +15,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "01_module_identification")
+notebook_out_dir <- file.path(analysis_dir, "02_module_identification")
 ```
 
 ## Load data
@@ -325,7 +325,7 @@ l_stepwise_all <- purrr::map(l_stepwise_all, function(res) {
 })
 
 saveRDS(l_stepwise_all,
-        file = file.path(notebook_out_dir, "01_01_stepwise-binomial-across-TADA-thresholds.RDS")
+        file = file.path(notebook_out_dir, "02_01_stepwise-binomial-across-TADA-thresholds.RDS")
 )
 ```
 
@@ -336,7 +336,7 @@ saveRDS(l_stepwise_all,
 
 ```{r supp_prep}
 # Load combined stepwise results across all TADA FDR thresholds
-l_stepwise_all <- readRDS(file.path(notebook_out_dir, "01_01_stepwise-binomial-across-TADA-thresholds.RDS"))
+l_stepwise_all <- readRDS(file.path(notebook_out_dir, "02_01_stepwise-binomial-across-TADA-thresholds.RDS"))
 
 # Long tibble of results across thresholds; fdr_label ordered lenient -> stringent.
 # module_label and n_genes_module are already carried on glm_results (see section 2.5).
@@ -459,7 +459,7 @@ fig_lr_sensitivity <- p_heatmap_thresh + p_or_thresholds +
 fig_lr_sensitivity
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "01_01_LR-sensitivity-combined.pdf"),
+    filename = file.path(figures_dir, "supplement", "02_01_LR-sensitivity-combined.pdf"),
     plot = fig_lr_sensitivity,
     height    = 4.5,
     width     = 7.09,

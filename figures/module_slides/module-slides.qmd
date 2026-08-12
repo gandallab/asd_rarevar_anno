@@ -8,11 +8,11 @@ format: html
 Each of the 28 stepwise-significant modules gets one 10 x 7.5 in landscape slide, all
 written to a single multi-page PDF in alphabetical order by module label. Panel sources:
 
-- GO similarity graph: networks saved by 05_03 (`05_03_all-module-GO-similarity-graphs.RDS`)
-- Brain spatial map: recomputed here in a python chunk (code from 03_05), title-free
+- GO similarity graph: networks saved by 06_03 (`06_03_all-module-GO-similarity-graphs.RDS`)
+- Brain spatial map: recomputed here in a python chunk (code from 04_05), title-free
 - Developmental trajectory: per-module BrainSpan code from TRY_module-dev-plots, cached here
-- GO enrichments: `02_00_sig-mod-GO-enrichments.RDS`
-- SynGO enrichments: term-level ORA from 05_02 section 2, run here on all modules (cached)
+- GO enrichments: `03_00_sig-mod-GO-enrichments.RDS`
+- SynGO enrichments: term-level ORA from 06_02 section 2, run here on all modules (cached)
 - Hub genes: top 10 by kME for GandalIsoforms/Wen co-expression modules, ASD genes bolded
 
 
@@ -34,11 +34,11 @@ brain_map_dir <- file.path(slides_dir, "AHBA_spatial_maps")
 
 # Cached-computation paths: the SynGO ORA and BrainSpan trajectories are computed on the
 # first render and reused afterwards; delete a file to force recomputation
-syngo_cache_path <- file.path(analysis_dir, "05_MORPH_annotation",
+syngo_cache_path <- file.path(analysis_dir, "06_MORPH_annotation",
                               "module-slides_all-module-SynGO-ORA.RDS")
-traj_cache_path  <- file.path(analysis_dir, "02_module_enrichments",
+traj_cache_path  <- file.path(analysis_dir, "03_module_enrichments",
                               "module-slides_brainspan-module-traj.RDS")
-brain_enr_dir    <- file.path(analysis_dir, "03_brain_spatial_enrichment",
+brain_enr_dir    <- file.path(analysis_dir, "04_brain_spatial_enrichment",
                               "module-slides_enrichment")
 ```
 
@@ -51,29 +51,29 @@ df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene
 
 # Significant ASD modules (28) with association statistics
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results %>%
     mutate(module = as.character(module))
 
-# Consensus GO topic per module (from 02_00)
+# Consensus GO topic per module (from 03_00)
 df_topic_consensus <- readRDS(
-    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+    file.path(analysis_dir, "03_module_enrichments", "03_00_topic-restart-stability.RDS")
 )$consensus %>%
     dplyr::select(module, topic = consensus_topic)
 
-# Gene-topic assignments (from notebook 02_02)
-df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+# Gene-topic assignments (from notebook 03_02)
+df_gene_assignments <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"))
 
 # Module membership (kME) for the co-expression studies
 df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
 
-# GO enrichments for all significant modules (from 02_00)
-df_go_res <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_sig-mod-GO-enrichments.RDS")) %>%
+# GO enrichments for all significant modules (from 03_00)
+df_go_res <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_00_sig-mod-GO-enrichments.RDS")) %>%
     mutate(module = as.character(module))
 
-# GO cosine-similarity networks per module (from 05_03; avoids re-querying org.Hs.eg.db)
+# GO cosine-similarity networks per module (from 06_03; avoids re-querying org.Hs.eg.db)
 all_module_nets <- readRDS(
-    file.path(analysis_dir, "05_MORPH_annotation", "05_03_all-module-GO-similarity-graphs.RDS")
+    file.path(analysis_dir, "06_MORPH_annotation", "06_03_all-module-GO-similarity-graphs.RDS")
 )
 
 # SynGO ontology
@@ -89,7 +89,7 @@ df_network_unnest <- df_network_data %>%
     unnest(cols = c(data))
 
 # Significant-module gene lists, rebuilt from the network RDS rather than read from
-# 01_00_sig-module-genes.csv: that CSV is Excel-corrupted (40 gene symbols converted to
+# 02_00_sig-module-genes.csv: that CSV is Excel-corrupted (40 gene symbols converted to
 # dates, e.g. MARCH4 -> "4-Mar"), and corrupted symbols silently drop out of the AHBA
 # matching. A clean copy is exported below for the python brain-map chunk.
 df_sig_module_genes <- df_network_unnest %>%
@@ -97,7 +97,7 @@ df_sig_module_genes <- df_network_unnest %>%
     distinct(module, module_label, study, gene_name) %>%
     left_join(df_topic_consensus, by = "module")
 
-sig_module_genes_path <- file.path(analysis_dir, "01_module_identification",
+sig_module_genes_path <- file.path(analysis_dir, "02_module_identification",
                                    "module-slides_sig-module-genes.csv")
 write_csv(df_sig_module_genes, sig_module_genes_path)
 
@@ -140,11 +140,11 @@ asd_risk_genes <- df_asd_rarevar_zscore %>%
 
 # --- 1) Brain spatial maps (python, spin conda env) --- #
 
-The per-module cortical enrichment maps from 03_05, recomputed here so the slides get
+The per-module cortical enrichment maps from 04_05, recomputed here so the slides get
 title-free panels that keep the colorbar (the slide header already names the module).
 The expensive step — 10,000
 size-matched resamples per module — is cached as one CSV per module under
-`outputs/analysis/03_brain_spatial_enrichment/module-slides_enrichment/`, so re-renders
+`outputs/analysis/04_brain_spatial_enrichment/module-slides_enrichment/`, so re-renders
 only redraw the surfaces. Delete a module's CSV to force a fresh enrichment; delete its
 PNG to force a redraw. Set `sh.DENSITY = "fsaverage5"` below for fast drafts.
 
@@ -165,18 +165,18 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 
 PROJ = os.path.expanduser("~/Documents/Postdoc/projects/ASD-rarevar-annot")
-sys.path.insert(0, f"{PROJ}/code/analysis/03_brain_spatial_enrichment")
+sys.path.insert(0, f"{PROJ}/code/analysis/04_brain_spatial_enrichment")
 import spatial_helpers as sh
 
 MAP_DIR = f"{PROJ}/outputs/figures/module_slides/AHBA_spatial_maps"
-ENR_DIR = f"{PROJ}/outputs/analysis/03_brain_spatial_enrichment/module-slides_enrichment"
+ENR_DIR = f"{PROJ}/outputs/analysis/04_brain_spatial_enrichment/module-slides_enrichment"
 for d in (MAP_DIR, ENR_DIR):
     os.makedirs(d, exist_ok=True)
 
 safe = lambda s: re.sub(r"[^A-Za-z0-9]+", "_", s).strip("_")
 
-# Clean gene-list export written by the R setup chunk (NOT the Excel-corrupted 01_00 CSV)
-mods = pd.read_csv(f"{PROJ}/outputs/analysis/01_module_identification/module-slides_sig-module-genes.csv")
+# Clean gene-list export written by the R setup chunk (NOT the Excel-corrupted 02_00 CSV)
+mods = pd.read_csv(f"{PROJ}/outputs/analysis/02_module_identification/module-slides_sig-module-genes.csv")
 module_info = {m: {"genes": g.gene_name.tolist(), "label": g.module_label.iloc[0]}
                for m, g in mods.groupby("module")}
 
@@ -195,7 +195,7 @@ if todo:
         lab = safe(d["label"])
         enr_path = f"{ENR_DIR}/{lab}.csv"
 
-        # enrichment: identical call to 03_05 (10k resamples, seed 0), cached per module
+        # enrichment: identical call to 04_05 (10k resamples, seed 0), cached per module
         if os.path.exists(enr_path):
             enr = pd.read_csv(enr_path)
         else:
@@ -206,7 +206,7 @@ if todo:
         # the views edge-to-edge with NO overlap (bare's wspace=-0.10 clips the lateral
         # view's anterior pole), and add the colorbar on its own axes in a reserved
         # right-hand strip so it doesn't shrink the brains.
-        # White medial wall as in the 03_05 module maps; each map on its own vmax
+        # White medial wall as in the 04_05 module maps; each map on its own vmax
         cmap = sh.diverging_cmap(); cmap.set_over("#FFFFFF")
         vmax = sh.cortical_vmax(enr)
         fig = sh.plot_dk_surface(dict(zip(enr.region, enr.z_vs_bg)), cmap, vmax, bare=True)
@@ -230,7 +230,7 @@ if todo:
 
 # --- 2) SynGO enrichment across all modules --- #
 
-Term-level SynGO ORA for every significant module, using exactly the 05_02 section-2
+Term-level SynGO ORA for every significant module, using exactly the 06_02 section-2
 procedure (Fisher's exact, one-sided over-representation; universe = the module's own
 study network intersected with the SynGO-annotated universe; BH within module).
 
@@ -259,7 +259,7 @@ if (file.exists(syngo_cache_path)) {
         deframe()
 
     # SynGO term -> gene list; ensembl_id is a comma-space-delimited string per term.
-    # Same size filter as 02_00 (drop very small / very broad terms)
+    # Same size filter as 03_00 (drop very small / very broad terms)
     syngo_genes_list <- df_syngo_ontol %>%
         dplyr::select(id, ensembl_id) %>%
         filter(!is.na(ensembl_id)) %>%
@@ -279,7 +279,7 @@ if (file.exists(syngo_cache_path)) {
         pull(ensembl_id) %>%
         unique()
 
-    # ORA: each module vs each SynGO term it overlaps by > 1 gene (same pre-filter as 05_02)
+    # ORA: each module vs each SynGO term it overlaps by > 1 gene (same pre-filter as 06_02)
     df_syngo_res <- imap_dfr(module_gene_ids, function(gene_ids, mod) {
         print(paste0("Running SynGO ORA for ", mod))
         syngo_tested <- syngo_genes_list[
@@ -317,7 +317,7 @@ if (file.exists(syngo_cache_path)) {
 # --- 3) BrainSpan developmental trajectories --- #
 
 Per-module trajectories, computed exactly as in TRY_module-dev-plots (which reuses the
-02_04 BrainSpan pipeline: Satterstrom et al. sample/gene filtering, per-gene z-scoring,
+03_04 BrainSpan pipeline: Satterstrom et al. sample/gene filtering, per-gene z-scoring,
 background-subtracted per-sample means, then a within-timepoint z-score across modules).
 Cached because the raw BrainSpan matrix is slow to load; the module set here is the 28
 stepwise modules (the TRY notebook used a stale 29-module set).
@@ -465,7 +465,7 @@ make_header <- function(meta) {
 ## 4.2 GO similarity graph of ASD genes in the module
 
 ```{r go_graph_function}
-# Same construction as 05_03: hub gene/TF + the module's ASD risk genes, each node linked
+# Same construction as 06_03: hub gene/TF + the module's ASD risk genes, each node linked
 # to its top-3 non-zero GO-BP cosine-similarity partners; hub bolded
 node_stats <- df_asd_rarevar_zscore %>%
     left_join(df_gene_assignments, by = join_by(gene_name)) %>%
@@ -579,7 +579,7 @@ n_top_terms <- 4
 # Fill ramps white -> topic color by odds ratio on a log scale; the ramp limits are
 # panel-specific (GO and SynGO ORs live on different ranges, so a shared scale washes
 # one of them out); an invisible layer carries the colorbar because fill is an identity
-# scale. Adapted from 05_02.
+# scale. Adapted from 06_02.
 plot_enrichment_bars <- function(df, topic, title, n_top = n_top_terms) {
     d <- df %>%
         filter(p_value < 0.05) %>%

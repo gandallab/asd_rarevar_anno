@@ -4,7 +4,7 @@ description: "Hypergeometric enrichment of each significant ASD module's full me
 format: html
 ---
 
-The topography analyses (notebooks 03_01–03_02) test the ASD *risk-gene* topic sets, which are
+The topography analyses (notebooks 04_01–04_02) test the ASD *risk-gene* topic sets, which are
 small (43–171 genes on the Tsyporin side) and, for MORPH, made up of upstream regulators
 that are largely absent from Tsyporin's Table S5 membership lists. Here we instead test the
 full co-expression / regulatory **module membership** of the significant ASD modules —
@@ -25,7 +25,7 @@ project_dir  <- path.expand("~/Documents/Postdoc/projects/ASD-rarevar-annot")
 source(file.path(project_dir, "code/setup.R"))          # topic_colors, theme, dirs
 
 analysis_dir <- file.path(project_dir, "outputs/analysis")
-results_dir  <- file.path(analysis_dir, "03_brain_spatial_enrichment")
+results_dir  <- file.path(analysis_dir, "04_brain_spatial_enrichment")
 supp_fig_dir <- file.path(figures_dir, "supplement")
 ```
 
@@ -42,12 +42,12 @@ SA <- list(S = tsy$GeneSymbol[tsy$Type == "S"],
 # stepwise conditional analysis with their consensus GO topic
 df_network_data <- readRDS(file.path(analysis_dir, "00_data_format/00_00_gene-networks-all.RDS"))
 df_top_topic <- readRDS(
-    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+    file.path(analysis_dir, "03_module_enrichments", "03_00_topic-restart-stability.RDS")
 )$consensus %>%
     dplyr::select(module, topic_label = consensus_topic)
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification",
-              "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification",
+              "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results
 
 df_network_data_unnested <- df_network_data %>% unnest(data)
@@ -97,7 +97,7 @@ hyper_mod_res <- df_sig_mods %>%
     group_by(list) %>% mutate(fdr = p.adjust(p, "BH")) %>% ungroup()
 
 write_csv(hyper_mod_res %>% dplyr::select(-any_of("genes")),
-          file.path(results_dir, "03_03_module-SA-enrichment.csv"))
+          file.path(results_dir, "04_03_module-SA-enrichment.csv"))
 hyper_mod_res
 ```
 
@@ -198,7 +198,7 @@ p_sa_combined <- p_sa / p_box +
     theme(plot.tag = element_text(face = "bold", size = 10))
 p_sa_combined
 
-ggsave(file.path(supp_fig_dir, "03_03_Tsyporin-SA-overlap.pdf"),
+ggsave(file.path(supp_fig_dir, "04_03_Tsyporin-SA-overlap.pdf"),
        plot = p_sa_combined, width = 7.1, height = 7, dpi = 300)
 ```
 
@@ -237,4 +237,4 @@ modules significant for both poles (2/5).
 
 The ASD morphogenesis programs are therefore wired into the association-identity machinery
 Tsyporin's transcription factors control — a convergence at the level of module membership
-that the cortical topography tests in notebooks 03_01–03_02 are not designed to detect.
+that the cortical topography tests in notebooks 04_01–04_02 are not designed to detect.

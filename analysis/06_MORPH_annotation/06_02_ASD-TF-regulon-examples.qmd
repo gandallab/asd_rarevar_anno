@@ -16,7 +16,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "05_MORPH_annotation")
+notebook_out_dir <- file.path(analysis_dir, "06_MORPH_annotation")
 ```
 
 Load data
@@ -30,14 +30,14 @@ df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene
 
 # Module association results (defines which regulons have an ASD risk gene as their TF)
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results
 
 # Module membership (kME), used when building PPI node tables
 df_module_kme <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_co-expression-kME.RDS"))
 
-# Gene-topic assignments (from notebook 02_02)
-df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+# Gene-topic assignments (from notebook 03_02)
+df_gene_assignments <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"))
 
 # SynGO ontology
 syngo_dir <- file.path(data_dir, "SynGO")
@@ -112,7 +112,7 @@ asd_tf_regulon_nets <- map(
 
 # Save the network objects for plotting in Fig4 (named list, one entry per regulon)
 saveRDS(asd_tf_regulon_nets,
-        file = file.path(notebook_out_dir, "05_02_ASD-TF-regulon-GO-similarity-graphs.RDS"))
+        file = file.path(notebook_out_dir, "06_02_ASD-TF-regulon-GO-similarity-graphs.RDS"))
 ```
 
 
@@ -137,7 +137,7 @@ syngo_genes_list <- df_syngo_ontol %>%
     mutate(ensembl_id = str_trim(ensembl_id)) %>%
     group_by(id) %>%
     summarise(genes = list(unique(ensembl_id)), .groups = "drop") %>%
-    filter(lengths(genes) >= 5 & lengths(genes) <= 1000) %>% # drop very small / very broad terms (matches 02_00)
+    filter(lengths(genes) >= 5 & lengths(genes) <= 1000) %>% # drop very small / very broad terms (matches 03_00)
     deframe()
 
 # SynGO background: every gene annotated to any SynGO term (the list2 universe)
@@ -149,9 +149,9 @@ syngo_background <- df_syngo_ontol %>%
     pull(ensembl_id) %>%
     unique()
 
-# ORA: each regulon vs each SynGO term it overlaps by > 1 gene (same pre-filter as 02_00).
+# ORA: each regulon vs each SynGO term it overlaps by > 1 gene (same pre-filter as 03_00).
 # Fisher's exact, one-sided over-representation; universe = that regulon's study network
-# intersected with SynGO, matching the 02_00 call
+# intersected with SynGO, matching the 03_00 call
 df_syngo_res <- imap_dfr(regulon_gene_ids, function(gene_ids, mod) {
     syngo_tested <- syngo_genes_list[
         map_lgl(syngo_genes_list, ~ length(intersect(.x, gene_ids)) > 1)
@@ -182,7 +182,7 @@ df_syngo_res <- df_syngo_res %>%
     arrange(module, p_value)
 
 # Save the object for plotting in Fig4
-saveRDS(df_syngo_res, file = file.path(notebook_out_dir, "05_02_ASD-TF-regulon-SynGO-enrichment.RDS"))
+saveRDS(df_syngo_res, file = file.path(notebook_out_dir, "06_02_ASD-TF-regulon-SynGO-enrichment.RDS"))
 ```
 
 
@@ -277,7 +277,7 @@ ppi_data_results <- map(
 # Save output as RDS file (named list, one entry per regulon)
 saveRDS(
     ppi_data_results,
-    file = file.path(notebook_out_dir, "05_02_ASD-TF-regulons-PPI.RDS")
+    file = file.path(notebook_out_dir, "06_02_ASD-TF-regulons-PPI.RDS")
 )
 ```
 
@@ -433,7 +433,7 @@ p_asd_tf_ppi <- wrap_plots(ppi_plots, nrow = 1, guides = "collect") &
 p_asd_tf_ppi
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "05_02_ASD-TF-regulon-PPI.pdf"),
+    filename = file.path(figures_dir, "supplement", "06_02_ASD-TF-regulon-PPI.pdf"),
     plot = p_asd_tf_ppi,
     height    = 6,
     width     = 7.09,
@@ -453,7 +453,7 @@ regulons_to_plot <- c("ZBTB18_+_+", "FOXP2_(+)", "TCF4_(+)")
 
 # Consensus GO topic per regulon, so each panel is filled in its own program color
 df_top_topic <- readRDS(
-    file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS")
+    file.path(analysis_dir, "03_module_enrichments", "03_00_topic-restart-stability.RDS")
 )$consensus %>%
     dplyr::select(module, topic_label = consensus_topic)
 
@@ -468,9 +468,9 @@ regulon_panel_order <- regulons_to_plot
 regulon_label <- regulon_label[regulon_panel_order]
 regulon_topic <- regulon_topic[regulon_panel_order]
 
-# GO enrichments for these regulons, already computed in 02_00
+# GO enrichments for these regulons, already computed in 03_00
 df_go_res <- readRDS(
-    file.path(analysis_dir, "02_module_enrichments", "02_00_sig-mod-GO-enrichments.RDS")
+    file.path(analysis_dir, "03_module_enrichments", "03_00_sig-mod-GO-enrichments.RDS")
 ) %>%
     mutate(module = as.character(module))
 
@@ -611,7 +611,7 @@ wrap_plots(syngo_bar_plots, nrow = 1, guides = "collect") &
     theme(legend.position = "right")
 ```
 
-## 5.3 Top GO enrichments per regulon (from 02_00)
+## 5.3 Top GO enrichments per regulon (from 03_00)
 
 ```{r temp_go_bars, fig.height = 2.75, fig.width = 8.5}
 go_or_limits <- shared_or_limits(df_go_res %>% filter(module %in% asd_tf_regulons))
@@ -660,7 +660,7 @@ p_regulon_comparison <- wrap_plots(
 p_regulon_comparison
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "05_02_ASD-TF-regulon-comparison.pdf"),
+    filename = file.path(figures_dir, "supplement", "06_02_ASD-TF-regulon-comparison.pdf"),
     plot     = p_regulon_comparison,
     height   = 8,
     width    = 8,

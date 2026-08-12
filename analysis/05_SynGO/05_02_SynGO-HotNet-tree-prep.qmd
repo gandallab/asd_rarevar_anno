@@ -15,7 +15,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "04_SynGO")
+notebook_out_dir <- file.path(analysis_dir, "05_SynGO")
 ```
 
 ## 0.1 Load data
@@ -29,7 +29,7 @@ syngo_dir      <- file.path(data_dir, "SynGO")
 df_syngo_ontol <- read_xlsx(file.path(syngo_dir, "syngo_ontologies.xlsx"))
 
 # SynGO analysis results (CC and BP domains)
-syngo_summary_path <- file.path(analysis_dir, "04_SynGO", "04_01_syngo-asc-summary.xlsx")
+syngo_summary_path <- file.path(analysis_dir, "05_SynGO", "05_01_syngo-asc-summary.xlsx")
 df_cmu_cc <- read_xlsx(syngo_summary_path, sheet = "CC") %>% clean_names() %>%
     mutate(shortname = case_when(shortname == "integral"  ~ "integral component of",
                                  shortname == "extrinsic" ~ "extrinsic component of",
@@ -91,7 +91,7 @@ cat("HotNet gene set sizes:\n"); print(map_int(hotnet_gene_lists, length))
 ## 1.3 Save HotNet gene lists
 
 ```{r save_hotnets}
-saveRDS(hotnet_gene_lists, file.path(notebook_out_dir, "04_02_hotnet-gene-lists.RDS"))
+saveRDS(hotnet_gene_lists, file.path(notebook_out_dir, "05_02_hotnet-gene-lists.RDS"))
 ```
 
 
@@ -113,7 +113,7 @@ g_bp <- make_syngo_tbl_graph(
 g_cc <- make_syngo_tbl_graph(df_cmu_cc, z_thresh = NULL)
 
 # Save CC tree for figure
-saveRDS(g_cc, file.path(notebook_out_dir, "04_02_CC-hotnet-graph.RDS"))
+saveRDS(g_cc, file.path(notebook_out_dir, "05_02_CC-hotnet-graph.RDS"))
 ```
 
 
@@ -165,7 +165,7 @@ p_bp <- ggraph(layout_bp) +
 
 p_bp
 
-ggsave(file.path(figures_dir, "supplement", "04_02_SynGO-BP-tree-HotNet-labels.pdf"),
+ggsave(file.path(figures_dir, "supplement", "05_02_SynGO-BP-tree-HotNet-labels.pdf"),
        plot = p_bp, height = 6.69, width = 7.09, dpi = 300)
 ```
 

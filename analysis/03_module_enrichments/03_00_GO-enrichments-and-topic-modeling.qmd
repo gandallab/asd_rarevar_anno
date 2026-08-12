@@ -16,7 +16,7 @@ project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
 source(paste0(project_dir, "code/setup.R"))
 
 # Set directory for analysis outputs
-notebook_out_dir <- file.path(analysis_dir, "02_module_enrichments")
+notebook_out_dir <- file.path(analysis_dir, "03_module_enrichments")
 ```
 
 Load data
@@ -27,7 +27,7 @@ df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene
 
 # Significant ASD modules
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results %>% 
     mutate(module_label = factor(module_label, levels = unique(.$module_label)))
 ```
@@ -147,12 +147,12 @@ df_go_res <- df_go_res %>%
 # Save output as RDS file
 saveRDS(
     df_go_res,
-    file = file.path(notebook_out_dir, "02_00_sig-mod-GO-enrichments.RDS")
+    file = file.path(notebook_out_dir, "03_00_sig-mod-GO-enrichments.RDS")
 )
 # Write significant results to Excel
 write_csv(
     df_go_res %>% filter(p_value < 0.05),
-    path = file.path(notebook_out_dir, "02_00_sig-mod-GO-enrichments-p0.05.csv")
+    path = file.path(notebook_out_dir, "03_00_sig-mod-GO-enrichments-p0.05.csv")
 )
 ```
 
@@ -241,7 +241,7 @@ df_k_metrics <- map2_dfr(k_range, k_models, function(k, m) {
 topic_model <- k_models[[2]]
 
 # Save fitted topic model for downstream analyses & figures
-saveRDS(topic_model, file = file.path(notebook_out_dir, "02_00_topic-model-K3.RDS"))
+saveRDS(topic_model, file = file.path(notebook_out_dir, "03_00_topic-model-K3.RDS"))
 ```
 
 ## 2.4 Extract topic model metrics
@@ -263,7 +263,7 @@ df_beta <- tidytext::tidy(topic_model, matrix = "beta") %>%
     ungroup()
 
 # Save for figure
-saveRDS(df_beta, file = file.path(notebook_out_dir, "02_00_topic-word-beta.RDS"))
+saveRDS(df_beta, file = file.path(notebook_out_dir, "03_00_topic-word-beta.RDS"))
 ```
 
 Gamma = module-topic probability
@@ -315,7 +315,7 @@ df_gamma <- tidytext::tidy(
     ungroup
 
 # Save for downstream analyses & figures
-saveRDS(df_gamma, file = file.path(notebook_out_dir, "02_00_topic-module-gamma.RDS"))
+saveRDS(df_gamma, file = file.path(notebook_out_dir, "03_00_topic-module-gamma.RDS"))
 ```
 
 ## 2.5 Assignment stability across random restarts
@@ -422,7 +422,7 @@ saveRDS(
         assignment_prop = df_assignment_prop,
         n_restarts      = n_restarts
     ),
-    file = file.path(notebook_out_dir, "02_00_topic-restart-stability.RDS")
+    file = file.path(notebook_out_dir, "03_00_topic-restart-stability.RDS")
 )
 
 # Modules whose consensus assignment differs from the single-fit assignment
@@ -454,7 +454,7 @@ p_k_tradeoff <- df_k_metrics %>%
 p_k_tradeoff
 
 ggsave(
-    filename = file.path(figures_dir, "supplement", "02_02_topic-model-K-selection.pdf"),
+    filename = file.path(figures_dir, "supplement", "03_02_topic-model-K-selection.pdf"),
     plot = p_k_tradeoff,
     width = 3,
     height = 3,
@@ -494,7 +494,7 @@ df_topic_top_words <- purrr::map_dfc(c("SYN", "GR", "MORPH"), function(label) {
 })
 
 write_csv(df_topic_top_words,
-          file.path(notebook_out_dir, "02_00_topic-top-words.csv")
+          file.path(notebook_out_dir, "03_00_topic-top-words.csv")
 )
 ```
 
@@ -507,11 +507,11 @@ saveRDS(
         assignment_prop = df_assignment_prop,
         n_restarts      = n_restarts
     ),
-    file = file.path(notebook_out_dir, "02_00_topic-restart-stability.RDS")
+    file = file.path(notebook_out_dir, "03_00_topic-restart-stability.RDS")
 )
-topic_stability <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-restart-stability.RDS"))
+topic_stability <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_00_topic-restart-stability.RDS"))
 
-df_gamma <- readRDS(file.path(analysis_dir, "02_module_enrichments", "02_00_topic-module-gamma.RDS"))
+df_gamma <- readRDS(file.path(analysis_dir, "03_module_enrichments", "03_00_topic-module-gamma.RDS"))
 ```
 
 
@@ -522,5 +522,5 @@ topic_stability$consensus %>%
     left_join(topic_stability$assignment_prop) %>% 
     left_join(df_gamma %>% dplyr::select(-c(z_score, p_value, p_adj, topic_color, top_topic))) %>% 
 
-    write_csv(file.path(notebook_out_dir, "02_00_topic-module-assignments.csv"))
+    write_csv(file.path(notebook_out_dir, "03_00_topic-module-assignments.csv"))
 ```

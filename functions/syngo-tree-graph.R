@@ -1,6 +1,6 @@
 #===============================================================================
 # Build a pruned ggraph tree from a df_cmu (SynGO CMU) domain subset
-# Relocated from 04_00_SynGO-ms-fig.qmd; used by 04_SynGO analysis and Fig3.
+# Relocated from 05_00_SynGO-ms-fig.qmd; used by 05_SynGO analysis and Fig3.
 #===============================================================================
 
 # Build a directed tbl_graph (parent → child) from a df_cmu domain subset.

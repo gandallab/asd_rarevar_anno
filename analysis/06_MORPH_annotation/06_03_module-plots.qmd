@@ -29,12 +29,12 @@ df_network_data <- readRDS(file.path(analysis_dir, "00_data_format", "00_00_gene
 
 # Significant ASD modules
 df_stepwise_res <- readRDS(
-    file.path(analysis_dir, "01_module_identification", "01_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
+    file.path(analysis_dir, "02_module_identification", "02_00_stepwise-linear-res-step1p0.001-step2p0.001.RDS")
 )$lm_results %>% 
     mutate(module_label = factor(module_label, levels = unique(.$module_label)))
 
-# Gene-topic assignments (from notebook 02_02)
-df_gene_assignments <- read_csv(file.path(analysis_dir, "02_module_enrichments", "02_02_gene-topic-assignment.csv"))
+# Gene-topic assignments (from notebook 03_02)
+df_gene_assignments <- read_csv(file.path(analysis_dir, "03_module_enrichments", "03_02_gene-topic-assignment.csv"))
 
 # SynGO ontology
 syngo_dir <- file.path(data_dir, "SynGO")
@@ -101,7 +101,7 @@ all_module_nets <- map(
 names(all_module_nets) <- sig_mods
 
 # Save the network object for plotting
-saveRDS(all_module_nets, file = file.path(notebook_out_dir, "05_03_all-module-GO-similarity-graphs.RDS"))
+saveRDS(all_module_nets, file = file.path(notebook_out_dir, "06_03_all-module-GO-similarity-graphs.RDS"))
 ```
 
 
