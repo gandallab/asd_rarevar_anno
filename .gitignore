@@ -1,7 +1,17 @@
-data/**
-!data/README.md
+# Rare-variant statistics and de novo mutation counts — not ours to publish
+# (see data/README.md for sources; place at these paths to re-run)
+data/full_results_wcounts_*.txt
+data/DDID/
+
+# Large data files excluded for size (see data/README.md)
+data/BrainSpan/expression_matrix.csv
+data/networks/Gandal2022_table_s5.xlsx
+data/networks/Nano2025_table_s1-33.xlsx
+data/Gandal2022/TableS3.xlsx
+data/AHBA/abagen_data/
 
 .DS_Store
+~$*
 
 output/some_large_file.tsv
 

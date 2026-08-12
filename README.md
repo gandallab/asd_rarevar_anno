@@ -25,7 +25,7 @@ interpretation.
 │   ├── analysis/    # Reusable statistical outputs, mirrored per analysis module
 │   ├── figures/     # Rendered figure PDFs/PNGs/SVGs
 │   └── tables/      # Submission-ready supplementary tables
-├── data/            # Path notes (no data files stored in this repo)
+├── data/            # Published source inputs (supp. tables, atlases, gene lists)
 ├── cmu/             # Collaborator (CMU) working files for DNM/SynGO enrichments — reference only, not part of the reproducible pipeline
 ├── assets/          # Quarto CSS and static assets
 ├── index.qmd        # Quarto site home page
@@ -37,11 +37,11 @@ interpretation.
 Each module follows a stepwise numbered layout. Common subdirectory patterns:
 `01_input_prep/`, `02_compute/`, `03_group_tests/`, `04_export/`.
 
-File names within modules `02`–`07` keep the numbering of the development repo
-(`rlsmith1/ASD-rarevar-annot`, where `01_scdrs_trajectory` does not exist and modules
-run `01`–`06`), so file prefixes are offset by one from the directory numbers here.
-Files are copied verbatim from that repo; `outputs/analysis/` subdirectories mirror
-the `analysis/` module numbering.
+Within modules `02`–`07`, file-name prefixes are offset by one from the directory
+numbers (e.g. `02_module_identification/01_00_*`): the prefixes predate the insertion
+of `01_scdrs_trajectory` into the module order and are kept stable because scripts and
+outputs reference each other by these prefixes. `outputs/analysis/` subdirectories
+mirror the `analysis/` module numbering.
 
 ### [`analysis/_shared/`](analysis/_shared/)
 
@@ -151,7 +151,7 @@ and `analysis/05_SynGO`:
 - [`syngo-tree-graph.R`](functions/syngo-tree-graph.R) — pruned ggraph tree from a SynGO CMU domain subset
 
 [`setup.R`](setup.R) (repo root) is the library/theme/path setup script sourced at the top
-of the R notebooks (as `code/setup.R` in the development repo).
+of the R notebooks.
 
 ## Figures
 
@@ -172,9 +172,14 @@ raw data here.
 ## Outputs
 
 - [`outputs/analysis/`](outputs/analysis/) — reusable statistical outputs mirrored per analysis module (module stats, GO enrichments, AUCell scores, SynGO/MORPH results, DD/ID enrichment tables)
-- [`outputs/figures/`](outputs/figures/) — rendered figure PDFs/PNGs/SVGs, including per-module summary slides ([`module_slides/`](outputs/figures/module_slides/))
-- [`outputs/tables/`](outputs/tables/) — submission-ready supplementary tables
+- [`outputs/figures/`](outputs/figures/) — rendered figure PDFs/PNGs, including per-module summary slides ([`module_slides/`](outputs/figures/module_slides/)) and the final supplementary figures ([`supplement/`](outputs/figures/supplement/), `Supp-Fig-01.png`–`Supp-Fig-30.png`, numbered as in the supplement text)
+- [`outputs/tables/`](outputs/tables/) — submission-ready supplementary tables (`TableS1`–`TableS18`, numbered as in the supplement text)
 
 ## Data
 
-No data files are stored in this repository. See [`data/README.md`](data/README.md).
+[`data/`](data/) contains the published source inputs the analyses read: supplementary
+tables from the network studies, reference atlases (AHBA, BrainSpan), SynGO, and curated
+gene lists. Rare-variant statistics and de novo mutation counts are **not** posted — they
+are not ours to publish — and a few files are excluded for size; see
+[`data/README.md`](data/README.md) for the full inventory, sources, and the single-cell
+data locations on the lab HPC.
