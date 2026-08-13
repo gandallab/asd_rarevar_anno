@@ -3,6 +3,9 @@
 data/full_results_wcounts_*.txt
 data/DDID/
 
+# Collaborator working files, incl. de novo mutation counts — never commit
+cmu/
+
 # Large data files excluded for size (see data/README.md)
 data/BrainSpan/expression_matrix.csv
 data/networks/Gandal2022_table_s5.xlsx
