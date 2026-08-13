@@ -12,9 +12,9 @@ interpretation.
 │   ├── 00_data_format/           # Format network + ASD rare-variant input data
 │   ├── 01_scdrs_trajectory/      # scDRS disease-relevance scoring + lineage trajectory
 │   ├── 02_module_identification/ # Stepwise conditional module identification
-│   ├── 03_module_enrichments/    # GO/topic enrichments, AUCell, BrainSpan development
+│   ├── 03_module_enrichments/    # GO/topic enrichments, module AUCell, BrainSpan development
 │   ├── 04_brain_spatial_enrichment/ # AHBA cortical spin tests, developmental spatial enrichment
-│   ├── 05_SynGO/                 # SynGO/HotNet enrichment, partition rate ratios, AUCell
+│   ├── 05_SynGO/                 # SynGO/HotNet enrichment, partition rate ratios, HotNet AUCell
 │   ├── 06_MORPH_annotation/      # MORPH subclustering and TF-regulon/MEF2C module analyses
 │   └── 07_ddid_stratification/   # DD/ID comorbidity-stratified analyses
 ├── figures/         # Manuscript figure reproduction by figure number
@@ -23,8 +23,8 @@ interpretation.
 ├── functions/       # Shared plotting/network-analysis helper functions
 ├── outputs/
 │   ├── analysis/    # Reusable statistical outputs, mirrored per analysis module
-│   ├── figures/     # Rendered figure PDFs/PNGs/SVGs
-│   └── tables/      # Submission-ready supplementary tables
+│   ├── figures/     # Rendered figure PDFs/PNGs
+│   └── tables/      # Supplementary tables for submission
 ├── data/            # Published source inputs (supp. tables, atlases, gene lists)
 ├── assets/          # Quarto CSS and static assets
 ├── index.qmd        # Quarto site home page
@@ -91,8 +91,7 @@ GO/topic-model enrichments and developmental trajectories for identified modules
 ### [`analysis/04_brain_spatial_enrichment/`](analysis/04_brain_spatial_enrichment/)
 
 Cortical spatial enrichment of ASD risk genes and gene programs against the Allen Human
-Brain Atlas (AHBA), with spin-test significance (Alexander-Bloch permutations) and
-developmental follow-ups.
+Brain Atlas (AHBA), with spin-test significance and mubrain mid-fetal cortical region x tissue layer enrichments.
 
 - [`04_00_build-ahba-matrix.ipynb`](analysis/04_brain_spatial_enrichment/04_00_build-ahba-matrix.ipynb) — build the AHBA region × gene expression matrix
 - [`04_01_asd-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/04_01_asd-spatial-enrichment.ipynb) — ASD risk-gene cortical enrichment + spin tests
@@ -176,7 +175,6 @@ raw data here.
 
 [`data/`](data/) contains the published source inputs the analyses read: supplementary
 tables from the network studies, reference atlases (AHBA, BrainSpan), SynGO, and curated
-gene lists. Rare-variant statistics and de novo mutation counts are **not** posted — they
-are not ours to publish — and a few files are excluded for size; see
+gene lists. Rare-variant statistics and de novo mutation counts are **not** posted and a few files are excluded for size; see
 [`data/README.md`](data/README.md) for the full inventory, sources, and the single-cell
 data locations on the lab HPC.

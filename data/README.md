@@ -13,7 +13,7 @@ Script numbers below (e.g. `04_01`) refer to the file-name prefixes of the noteb
 ## Not included in this repository
 
 **Rare-variant statistics and de novo mutation counts are not distributed with this
-repo** — they are not ours to publish. Obtain them from the original sources and place
+repo**. Obtain them from the original sources and place
 them at the paths below to reproduce the analyses.
 
 | Path | Contents | Source |
