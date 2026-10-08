@@ -5,6 +5,8 @@ interpretation.
 
 ## System requirements
 
+**Operating system:** tested on macOS Sequoia 15.3.1 (Apple silicon). **Hardware:** the R notebooks and figure scripts run on a standard desktop. scDRS, AUCell and the spin tests are run on a computing cluster (SLURM).
+
 ### R dependencies
 
 R 4.4.0 with the following packages (versions tested):
@@ -13,17 +15,17 @@ R 4.4.0 with the following packages (versions tested):
 |----------|----------|
 | **Tidyverse / data wrangling** | tidyverse 2.0.0, data.table 1.16.4, readxl 1.4.5, openxlsx 4.2.8.1, arrow 23.0.1.1, janitor 2.2.1, R.utils 2.13.0, scales 1.4.0 |
 | **Visualization** | ggplot2 4.0.1, cowplot 1.2.0, patchwork 1.3.2, gridExtra 2.3, gridGraphics 0.5-1, ggplotify 0.1.3, ragg 1.3.3 |
-| **ggplot2 extensions** | ggrepel 0.9.6, ggtext 0.1.2, ggh4x, ggforce 0.5.0, ggside, ggExtra, ggbeeswarm 0.7.2, ggpubr 0.6.2, ggdendro 0.2.0, ggnewscale 0.5.2, ggraph 2.2.2 |
+| **ggplot2 extensions** | ggrepel 0.9.6, ggtext 0.1.2, ggh4x 0.3.1, ggforce 0.5.0, ggside 0.4.1, ggExtra 0.11.0, ggbeeswarm 0.7.2, ggpubr 0.6.2, ggdendro 0.2.0, ggnewscale 0.5.2, ggraph 2.2.2 |
 | **Color / palettes** | RColorBrewer 1.1-3, viridis 0.6.5, paletteer 1.6.0, pals 1.9, colorspace 2.1-1, circlize 0.4.16, ggsci 4.1.0 |
 | **Heatmaps** | ComplexHeatmap 2.20.0, pheatmap 1.0.13 |
-| **Network / graph** | igraph 2.2.1, tidygraph 1.3.1, STRINGdb |
+| **Network / graph** | igraph 2.2.1, tidygraph 1.3.1, STRINGdb 2.20.0 |
 | **Single-cell / genomics** | Seurat 5.3.1, SeuratDisk 0.0.0.9021, Signac 1.16.0, AUCell 1.26.0, anndata 0.8.0, reticulate 1.44.0, edgeR 4.2.2, slingshot 2.7.0 |
-| **Genome annotation** | AnnotationHub, AnnotationDbi 1.66.0, GenomicFeatures 1.56.0, org.Hs.eg.db 3.19.1, GO.db 3.19.1, ensembldb 2.28.1, rtracklayer 1.64.0 |
-| **Functional enrichment** | clusterProfiler 4.12.6, gprofiler2 |
+| **Genome annotation** | AnnotationHub 3.16.1, TxDb.Hsapiens.UCSC.hg19.knownGene 3.2.2, TxDb.Hsapiens.UCSC.hg38.knownGene 3.21.0, AnnotationDbi 1.66.0, GenomicFeatures 1.56.0, org.Hs.eg.db 3.19.1, GO.db 3.19.1, ensembldb 2.28.1, rtracklayer 1.64.0 |
+| **Functional enrichment** | clusterProfiler 4.12.6, gprofiler2 0.2.4 |
 | **Statistical modeling** | lme4 1.1-38, lmerTest 3.1-3, emmeans 2.0.0, mgcv 1.9-1, glmmSeq 0.5.7, metafor 4.6-0, mclust 6.1.2, mixtools 2.0.0.1 |
 | **Text / topic modeling** | tidytext 0.4.3, stm 1.3.8 |
-| **Other** | dendextend 1.19.1, ape 5.8-1, png 0.1-8, future 1.67.0, knitr 1.51, Matrix 1.7-1, eulerr |
-| **Also loaded (versions not yet recorded)** | here, tidymodels, vip, ggfortify, tidyomics, writexl, WriteXLS, scCustomize, scater, scran, TxDb.Hsapiens.UCSC.hg19.knownGene, TxDb.Hsapiens.UCSC.hg38.knownGene |
+| **Other** | dendextend 1.19.1, ape 5.8-1, png 0.1-8, future 1.67.0, knitr 1.51, Matrix 1.7-1, eulerr 8.0.0, tidymodels 1.4.1, vip 0.4.1, ggfortify 0.4.19, tidyomics 1.4.0, writexl 1.5.4 |
+| **Also loaded (versions not yet recorded)** | here, WriteXLS, scCustomize, scater, scran |
 
 ### Python dependencies
 
