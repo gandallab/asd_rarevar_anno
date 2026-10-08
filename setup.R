@@ -62,9 +62,9 @@ filter <- dplyr::filter
 
 # --- Set directories ---#
 
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
+project_dir <- paste0(here::here(), "/")
 data_dir <- paste0(project_dir, "data/")
-functions_dir <- paste0(project_dir, "code/functions/")
+functions_dir <- paste0(project_dir, "functions/")
 
 out_dir <- paste0(project_dir, "outputs/")
 objects_dir <- paste0(out_dir, "objects/")

@@ -39,8 +39,8 @@ TOPIC_COLORS = {"SYN": "#4a2377", "GR": "#ea801c", "MORPH": "#0d7d87"}
 GENE_SET_COLORS = {"ASD": ASD_COLOR, **TOPIC_COLORS}
 OCCIPITAL = ["pericalcarine", "lateraloccipital", "lingual", "cuneus"]
 
-# Project root, resolved from this file (code/analysis/04_brain_spatial_enrichment/).
-PROJ = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# Project root, resolved from this file (analysis/04_brain_spatial_enrichment/).
+PROJ = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # Everything AHBA-derived lives together: the region x gene matrix, the atlas metadata,
 # the Dear et al. gradient scores and the two DK .annot label files. Sets the default for

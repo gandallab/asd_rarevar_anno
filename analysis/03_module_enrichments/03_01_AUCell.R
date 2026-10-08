@@ -4,8 +4,8 @@
 # NOTE: This script needs be run on an HPC cluster! 
 # Run using the following code:
 # sbatch --job-name=AUCell --mem=128G --cpus-per-task=4 --time=8:00:00 \
-# --output=/mnt/isilon/gandal_lab/smithr30/ASD-rarevar-annot/outputs/analysis/03_module_enrichments/03_01_AUCell/AUCell_run_%j.log \
-# --wrap="bash -lc 'module load R/4.5.1 && Rscript /mnt/isilon/gandal_lab/smithr30/ASD-rarevar-annot/code/analysis/03_module_enrichments/03_01_AUCell.R'"
+# --output=outputs/analysis/03_module_enrichments/03_01_AUCell/AUCell_run_%j.log \
+# --wrap="bash -lc 'module load R/4.5.1 && Rscript analysis/03_module_enrichments/03_01_AUCell.R'"
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
@@ -18,7 +18,7 @@ library(tidyr)
 library(tibble)
 
 # Set directories
-project_dir   <- "/mnt/isilon/gandal_lab/smithr30/ASD-rarevar-annot/"
+project_dir <- paste0(here::here(), "/")
 out_dir       <- file.path(project_dir, "outputs/")
 wang_data_dir <- "/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data/SnMultiome_Wang2025/"
 

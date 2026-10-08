@@ -69,7 +69,7 @@ def resample_parc_to_density(parc, target_density, src_density="164k"):
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # project root, so the defaults below hold wherever the job is launched from
-PROJ = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+PROJ = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 AHBA = f"{PROJ}/data/AHBA"
 ANALYSIS = f"{PROJ}/outputs/analysis/04_brain_spatial_enrichment"
 

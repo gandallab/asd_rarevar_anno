@@ -29,3 +29,6 @@ output/some_large_file.tsv
 *_files/
 
 *.ai
+
+__pycache__/
+*.pyc

@@ -15,8 +15,8 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 ```{r env}
 # Source setup script
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
-source(paste0(project_dir, "code/setup.R"))
+project_dir <- paste0(here::here(), "/")
+source(paste0(project_dir, "setup.R"))
 
 # List available networks files
 networks_files <- list.files(file.path(data_dir, "networks"))

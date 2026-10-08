@@ -9,8 +9,8 @@ format: html
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 # Source setup script
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
-source(paste0(project_dir, "code/setup.R"))
+project_dir <- paste0(here::here(), "/")
+source(paste0(project_dir, "setup.R"))
 ```
 
 ## 0.0 Load data
@@ -708,7 +708,7 @@ logbf_rng <- node_stats %>%
 # --- Plot --- #
 
 # plot_go_graph() (graphopt layout, GO-topic fill, log10(BF) size, similarity-scaled edges,
-# bold hubs/TFs) is sourced from code/functions/plot_GO_similarity_graphs.R
+# bold hubs/TFs) is sourced from functions/plot_GO_similarity_graphs.R
 
 # Per-panel padding: wide-but-short cells get more horizontal padding (compress x) and less
 # vertical (stretch y) to keep node spacing even across panels.

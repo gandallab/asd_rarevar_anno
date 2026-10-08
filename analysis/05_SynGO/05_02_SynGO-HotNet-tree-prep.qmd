@@ -11,8 +11,8 @@ format: html
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 # Source setup script
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
-source(paste0(project_dir, "code/setup.R"))
+project_dir <- paste0(here::here(), "/")
+source(paste0(project_dir, "setup.R"))
 
 # Set directory for analysis outputs
 notebook_out_dir <- file.path(analysis_dir, "05_SynGO")
@@ -99,7 +99,7 @@ saveRDS(hotnet_gene_lists, file.path(notebook_out_dir, "05_02_hotnet-gene-lists.
 # --- 2) Build HotNet trees --- #
 
 `make_syngo_tbl_graph()` (pruned parent→child tree from a df_cmu domain subset)
-lives in `code/functions/syngo-tree-graph.R`, sourced by `setup.R`.
+lives in `functions/syngo-tree-graph.R`, sourced by `setup.R`.
 
 ```{r build_trees}
 # BP tree (drop nodes with a non-numeric adj_z_all)

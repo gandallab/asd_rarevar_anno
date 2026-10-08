@@ -9,8 +9,8 @@ format: html
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 # Source setup script
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
-source(paste0(project_dir, "code/setup.R"))
+project_dir <- paste0(here::here(), "/")
+source(paste0(project_dir, "setup.R"))
 ```
 
 Load data for plots

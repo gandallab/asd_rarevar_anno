@@ -4,7 +4,7 @@
 rm(list=ls()); gc()
 options(stringsAsFactors = F)
 
-project_dir  <- path.expand("~/Documents/Postdoc/projects/ASD-rarevar-annot")
+project_dir <- here::here()
 data_dir     <- file.path(project_dir, "data")
 syngo_dir    <- file.path(data_dir, "SynGO")
 out_dir      <- file.path(project_dir, "outputs/analysis/05_SynGO")

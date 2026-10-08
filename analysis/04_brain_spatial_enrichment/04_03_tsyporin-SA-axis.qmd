@@ -21,8 +21,8 @@ can only join a module if it was measured in that study.
 ```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse); library(readxl); library(janitor); library(ggtext); library(patchwork)
 
-project_dir  <- path.expand("~/Documents/Postdoc/projects/ASD-rarevar-annot")
-source(file.path(project_dir, "code/setup.R"))          # topic_colors, theme, dirs
+project_dir <- here::here()
+source(file.path(project_dir, "setup.R"))          # topic_colors, theme, dirs
 
 analysis_dir <- file.path(project_dir, "outputs/analysis")
 results_dir  <- file.path(analysis_dir, "04_brain_spatial_enrichment")

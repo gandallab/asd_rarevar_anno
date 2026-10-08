@@ -11,8 +11,8 @@ format: html
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 # Source setup script
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
-source(paste0(project_dir, "code/setup.R"))
+project_dir <- paste0(here::here(), "/")
+source(paste0(project_dir, "setup.R"))
 
 # Set directory for analysis outputs
 notebook_out_dir <- file.path(analysis_dir, "03_module_enrichments")
@@ -56,7 +56,7 @@ GR_genes <- df_gene_assignments %>%
     filter(GO_topic == "GR") %>%
     pull(gene_name)
 
-# Build GO cosine similarity network (build_go_network defined in code/functions/build_go_network.R)
+# Build GO cosine similarity network (build_go_network defined in functions/build_go_network.R)
 GR_net <- build_go_network(
     GR_genes,
     go_mapping = go_mapping %>% filter(ontology == "BP"),

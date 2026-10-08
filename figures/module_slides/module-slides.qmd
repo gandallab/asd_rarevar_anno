@@ -24,8 +24,8 @@ written to a single multi-page PDF in alphabetical order by module label. Panel 
 knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 
 # Source setup script
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
-source(paste0(project_dir, "code/setup.R"))
+project_dir <- paste0(here::here(), "/")
+source(paste0(project_dir, "setup.R"))
 
 # Slide output directory (brain maps are written into a subdirectory by the python chunk)
 slides_dir    <- file.path(figures_dir, "module_slides")
@@ -164,8 +164,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 
-PROJ = os.path.expanduser("~/Documents/Postdoc/projects/ASD-rarevar-annot")
-sys.path.insert(0, f"{PROJ}/code/analysis/04_brain_spatial_enrichment")
+PROJ = os.path.abspath(os.path.join(os.getcwd(), "..", ".."))  # repo root (run from this directory)
+sys.path.insert(0, f"{PROJ}/analysis/04_brain_spatial_enrichment")
 import spatial_helpers as sh
 
 MAP_DIR = f"{PROJ}/outputs/figures/module_slides/AHBA_spatial_maps"

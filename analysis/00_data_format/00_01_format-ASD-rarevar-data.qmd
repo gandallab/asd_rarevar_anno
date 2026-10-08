@@ -12,8 +12,8 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ```
 
 ```{r env}
-project_dir <- "~/Documents/Postdoc/Projects/ASD-rarevar-annot/"
-source(paste0(project_dir, "code/setup.R"))
+project_dir <- paste0(here::here(), "/")
+source(paste0(project_dir, "setup.R"))
 
 # Set directory for analysis outputs
 notebook_out_dir <- file.path(analysis_dir, "00_data_format")

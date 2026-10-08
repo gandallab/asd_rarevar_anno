@@ -3,6 +3,88 @@
 Research analysis project for ASD rare variant annotation and downstream single-cell
 interpretation.
 
+## System requirements
+
+### R dependencies
+
+R 4.4.0 with the following packages (versions tested):
+
+| Category | Packages |
+|----------|----------|
+| **Tidyverse / data wrangling** | tidyverse 2.0.0, data.table 1.16.4, readxl 1.4.5, openxlsx 4.2.8.1, arrow 23.0.1.1, janitor 2.2.1, R.utils 2.13.0, scales 1.4.0 |
+| **Visualization** | ggplot2 4.0.1, cowplot 1.2.0, patchwork 1.3.2, gridExtra 2.3, gridGraphics 0.5-1, ggplotify 0.1.3, ragg 1.3.3 |
+| **ggplot2 extensions** | ggrepel 0.9.6, ggtext 0.1.2, ggh4x, ggforce 0.5.0, ggside, ggExtra, ggbeeswarm 0.7.2, ggpubr 0.6.2, ggdendro 0.2.0, ggnewscale 0.5.2, ggraph 2.2.2 |
+| **Color / palettes** | RColorBrewer 1.1-3, viridis 0.6.5, paletteer 1.6.0, pals 1.9, colorspace 2.1-1, circlize 0.4.16, ggsci 4.1.0 |
+| **Heatmaps** | ComplexHeatmap 2.20.0, pheatmap 1.0.13 |
+| **Network / graph** | igraph 2.2.1, tidygraph 1.3.1, STRINGdb |
+| **Single-cell / genomics** | Seurat 5.3.1, SeuratDisk 0.0.0.9021, Signac 1.16.0, AUCell 1.26.0, anndata 0.8.0, reticulate 1.44.0, edgeR 4.2.2, slingshot 2.7.0 |
+| **Genome annotation** | AnnotationHub, AnnotationDbi 1.66.0, GenomicFeatures 1.56.0, org.Hs.eg.db 3.19.1, GO.db 3.19.1, ensembldb 2.28.1, rtracklayer 1.64.0 |
+| **Functional enrichment** | clusterProfiler 4.12.6, gprofiler2 |
+| **Statistical modeling** | lme4 1.1-38, lmerTest 3.1-3, emmeans 2.0.0, mgcv 1.9-1, glmmSeq 0.5.7, metafor 4.6-0, mclust 6.1.2, mixtools 2.0.0.1 |
+| **Text / topic modeling** | tidytext 0.4.3, stm 1.3.8 |
+| **Other** | dendextend 1.19.1, ape 5.8-1, png 0.1-8, future 1.67.0, knitr 1.51, Matrix 1.7-1, eulerr |
+| **Also loaded (versions not yet recorded)** | here, tidymodels, vip, ggfortify, tidyomics, writexl, WriteXLS, scCustomize, scater, scran, TxDb.Hsapiens.UCSC.hg19.knownGene, TxDb.Hsapiens.UCSC.hg38.knownGene |
+
+### Python dependencies
+
+Python 3.9.14 (scDRS / trajectory modules):
+
+| Package | Version |
+|---------|---------|
+| scdrs | 1.0.4 |
+| scanpy | 1.10.3 |
+| anndata | 0.10.9 |
+| numpy | 1.26.4 |
+| scipy | 1.13.1 |
+| pandas | 2.3.3 |
+| statsmodels | 0.14.5 |
+| matplotlib | 3.9.4 |
+
+Python 3.10 (spatial enrichment module, `analysis/04_brain_spatial_enrichment/`), via two pinned conda environments in that directory:
+
+- [`ahba.yml`](analysis/04_brain_spatial_enrichment/ahba.yml) — AHBA matrix build (abagen 0.1.3; numpy 1.26, pandas 1.5, nilearn 0.10)
+- [`spin.yml`](analysis/04_brain_spatial_enrichment/spin.yml) — spin tests and spatial enrichment (neuromaps 0.0.7; numpy 2.2, pandas 2.3, nilearn 0.14)
+
+Create each with `conda env create -f <file>.yml`; see the header of each file for kernel registration.
+
+### External tools
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| MAGMA | v1.10 | GWAS gene-level analysis for scDRS common-variant input |
+| MapMyCells | RRID: SCR_024672 | Allen Institute cell-type mapping (web service) |
+| SynGO | v1.2 | Synaptic gene ontology database |
+
+## Installation guide
+
+Install R packages and Python dependencies listed above. R packages can be installed from CRAN/Bioconductor. Typical install time is ~30 minutes on a standard desktop.
+
+## Data
+
+[`data/`](data/) contains the published source inputs the analyses read: supplementary
+tables from the network studies, reference atlases (AHBA, BrainSpan), SynGO, and curated
+gene lists. See [`data/README.md`](data/README.md) for the full inventory and sources.
+
+### External datasets not included in this repository
+
+The following publicly available datasets are required for full reproduction but are not distributed here due to size or licensing. Obtain them from the original sources:
+
+| Dataset | Source |
+|---------|--------|
+| Rare variant association results (gene-level counts, TADA) | Satterstrom et al. 2026, Tables S7, S9, S17 |
+| Developing snMultiome human brain atlas (Wang et al. 2025) | https://doi.org/10.5061/dryad.2280gb612 |
+| uBrain mid-fetal cortical microarray (Ball et al. 2024) | https://zenodo.org/records/10622337 |
+| Prenatal Visium spatial transcriptome (Aivazidis et al. 2025) | https://zenodo.org/records/14422018 |
+| Pre-synaptic mass spectrometry (Dumrongprechachan et al. 2022) | https://www.ebi.ac.uk/pride/archive?keyword=PXD030864 |
+| SynGO synaptic gene ontology (v1.2) | https://www.syngoportal.org/ |
+| ASD GWAS summary statistics (Matoba et al. 2020) | https://bitbucket.org/steinlabunc/spark_asd_sumstats |
+| BrainSpan developmental transcriptome (`expression_matrix.csv`) | https://www.brainspan.org/static/download.html |
+| Allen Human Brain Atlas microarray (~4 GB; downloaded automatically by abagen in `04_00`) | https://human.brain-map.org/static/download |
+
+## Demo
+
+All R and Python notebooks locate the repository root automatically (R via `here::here()`, anchored by the `.here` file; Python notebooks should be run from their own directory). No paths need editing to run them. Each `analysis/` module contains numbered scripts; most run on `data/` plus the external datasets listed above. Expected outputs are provided in `outputs/analysis/` (statistical results) and `outputs/figures/` (rendered figures). To verify the setup, render any figure notebook (e.g. `quarto render figures/fig03/Fig3.qmd`), which reads from pre-computed outputs and completes in under one minute. Full re-execution of compute-intensive modules (scDRS, AUCell) requires the single-cell atlas on the HPC; see [`data/README.md`](data/README.md) for data locations. The HPC scripts for these modules (`analysis/01_scdrs_trajectory/`, `analysis/03_module_enrichments/03_01_AUCell.R`, `analysis/05_SynGO/05_04_aucell/`, `analysis/07_ddid_stratification/01_input_prep/`–`03_group_tests/`, and the `.R` plotting scripts in `figures/fig01/`, `fig03/`, `fig05/` and `supp_fig/`) use absolute cluster paths that must be edited to point at your local copies of the data.
+
 ## Repository layout
 
 ```
@@ -170,11 +252,3 @@ raw data here.
 - [`outputs/analysis/`](outputs/analysis/) — reusable statistical outputs mirrored per analysis module (module stats, GO enrichments, AUCell scores, SynGO/MORPH results, DD/ID enrichment tables)
 - [`outputs/figures/`](outputs/figures/) — rendered figure PDFs/PNGs, including per-module summary slides ([`module_slides/`](outputs/figures/module_slides/)) and the final supplementary figures ([`supplement/`](outputs/figures/supplement/), `Supp-Fig-01.png`–`Supp-Fig-30.png`, numbered as in the supplement text)
 - [`outputs/tables/`](outputs/tables/) — submission-ready supplementary tables (`TableS1`–`TableS18`, numbered as in the supplement text)
-
-## Data
-
-[`data/`](data/) contains the published source inputs the analyses read: supplementary
-tables from the network studies, reference atlases (AHBA, BrainSpan), SynGO, and curated
-gene lists. Rare-variant statistics and de novo mutation counts are **not** posted and a few files are excluded for size; see
-[`data/README.md`](data/README.md) for the full inventory, sources, and the single-cell
-data locations on the lab HPC.
