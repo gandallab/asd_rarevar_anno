@@ -4,7 +4,7 @@
 #SBATCH -N 1
 #SBATCH -t 0-18:00
 #SBATCH --mem=90G
-#SBATCH --array=0-1
+#SBATCH --array=0-3
 #SBATCH -o /mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/logs/scDRS_group_%A_%a.out
 #SBATCH -e /mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/logs/scDRS_group_%A_%a.err
 
@@ -16,26 +16,38 @@ DATA_PATH=/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data
 H5AD_FILE=${DATA_PATH}/SnMultiome_Wang2025/obj_rna_raw.h5ad
 COV_FILE=${DATA_PATH}/SnMultiome_Wang2025/donorID_sex_ngene.cov
 
-# Array 0 = DDID, Array 1 = NoDDID
-if [ "${SLURM_ARRAY_TASK_ID}" -eq 0 ]; then
-    GROUP="ddid"
-elif [ "${SLURM_ARRAY_TASK_ID}" -eq 1 ]; then
-    GROUP="noddid"
-else
-    echo "ERROR: unexpected SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
-    exit 1
-fi
+# Array 0 = p_hat DDID (ASDDH, 121 genes)
+# Array 1 = p_hat NoDDID (ASDDL + ASDDA, 128 genes)
+# Array 2 = per-proband NoDDID (ASDDA alone, 44 genes, FDR<0.001)
+# Array 3 = per-proband NoDDID (ASDDA alone, 105 genes, FDR<0.01)
+case "${SLURM_ARRAY_TASK_ID}" in
+    0)
+        GROUP="ddid"
+        SUFFIX="new_DMN"
+        ;;
+    1)
+        GROUP="noddid"
+        SUFFIX="new_DMN"
+        ;;
+    2)
+        GROUP="noddid"
+        SUFFIX="perproband_new_DMN"
+        ;;
+    3)
+        GROUP="noddid"
+        SUFFIX="perproband_new_DMN_fdr01"
+        ;;
+    *)
+        echo "ERROR: unexpected SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
+        exit 1
+        ;;
+esac
 
+P_FILE=${DATA_PATH}/RVAS_result/full_results_wcounts_pfdr_${GROUP}_${SUFFIX}.tsv
+TRAIT_SCORE="ASC_TADA_Pfdr_${GROUP}_${SUFFIX}"
+TRAIT="ASC_Pfdr_${GROUP}_${SUFFIX}"
 
-P_FILE=${DATA_PATH}/RVAS_result/full_results_wcounts_pfdr_${GROUP}_perproband_new_DMN.tsv 
-TRAIT_SCORE="ASC_TADA_Pfdr_${GROUP}_perproband_new_DMN"
-TRAIT="ASC_Pfdr_${GROUP}_perproband_new_DMN"
-# P_FILE=${DATA_PATH}/RVAS_result/full_results_wcounts_pfdr_${GROUP}_new_DMN.tsv
-# TRAIT_SCORE="ASC_TADA_Pfdr_${GROUP}_new_DMN"
-# TRAIT="ASC_Pfdr_${GROUP}_new_DMN"
-
-
-echo "Running for GROUP = ${GROUP}"
+echo "Running for GROUP=${GROUP}, SUFFIX=${SUFFIX}"
 
 # Count number of genes in the file (excluding header)
 GENE_NUMBER=$(tail -n +2 ${P_FILE} | wc -l)

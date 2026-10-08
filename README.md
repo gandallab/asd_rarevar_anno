@@ -73,19 +73,18 @@ The following publicly available datasets are required for full reproduction but
 
 | Dataset | Source |
 |---------|--------|
-| Rare variant association results (gene-level counts, TADA) | Satterstrom et al. 2026, Tables S7, S9, S17 |
+| Rare variant association results (gene-level counts, TADA) | [Satterstrom et al. 2026](https://www.medrxiv.org/content/10.64898/2026.08.24.26360398v1), Tables S7, S9, S17 |
 | Developing snMultiome human brain atlas (Wang et al. 2025) | https://doi.org/10.5061/dryad.2280gb612 |
 | uBrain mid-fetal cortical microarray (Ball et al. 2024) | https://zenodo.org/records/10622337 |
 | Prenatal Visium spatial transcriptome (Aivazidis et al. 2025) | https://zenodo.org/records/14422018 |
 | Pre-synaptic mass spectrometry (Dumrongprechachan et al. 2022) | https://www.ebi.ac.uk/pride/archive?keyword=PXD030864 |
-| SynGO synaptic gene ontology (v1.2) | https://www.syngoportal.org/ |
 | ASD GWAS summary statistics (Matoba et al. 2020) | https://bitbucket.org/steinlabunc/spark_asd_sumstats |
 | BrainSpan developmental transcriptome (`expression_matrix.csv`) | https://www.brainspan.org/static/download.html |
 | Allen Human Brain Atlas microarray (~4 GB; downloaded automatically by abagen in `04_00`) | https://human.brain-map.org/static/download |
 
 ## Demo
 
-All R and Python notebooks locate the repository root automatically (R via `here::here()`, anchored by the `.here` file; Python notebooks should be run from their own directory). No paths need editing to run them. Each `analysis/` module contains numbered scripts; most run on `data/` plus the external datasets listed above. Expected outputs are provided in `outputs/analysis/` (statistical results) and `outputs/figures/` (rendered figures). To verify the setup, render any figure notebook (e.g. `quarto render figures/fig03/Fig3.qmd`), which reads from pre-computed outputs and completes in under one minute. Full re-execution of compute-intensive modules (scDRS, AUCell) requires the single-cell atlas on the HPC; see [`data/README.md`](data/README.md) for data locations. The HPC scripts for these modules (`analysis/01_scdrs_trajectory/`, `analysis/03_module_enrichments/03_01_AUCell.R`, `analysis/05_SynGO/05_04_aucell/`, `analysis/07_ddid_stratification/01_input_prep/`–`03_group_tests/`, and the `.R` plotting scripts in `figures/fig01/`, `fig03/`, `fig05/` and `supp_fig/`) use absolute cluster paths that must be edited to point at your local copies of the data.
+Each `analysis/` module contains numbered scripts that run on `data/` and the external datasets listed above. Expected outputs are provided in `outputs/analysis/` (statistical results) and `outputs/figures/` (rendered figures). To verify the setup, render any figure notebook (e.g. `quarto render figures/fig03/Fig3.qmd`), which reads from pre-computed outputs and completes in under one minute. Full re-execution of compute-intensive modules (scDRS, AUCell) requires the single-cell atlas on the HPC; see [`data/README.md`](data/README.md) for data locations. The HPC scripts for these modules (`analysis/01_scdrs_trajectory/`, `analysis/03_module_enrichments/03_01_AUCell.R`, `analysis/05_SynGO/05_04_aucell/`, `analysis/07_ddid_stratification/01_input_prep/`–`03_group_tests/`, and the `.R` plotting scripts in `figures/fig01/`, `fig03/`, `fig05/` and `supp_fig/`) use absolute cluster paths that must be edited to point at your local copies of the data.
 
 ## Repository layout
 

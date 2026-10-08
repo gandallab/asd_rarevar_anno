@@ -4,7 +4,7 @@
 #SBATCH -N 1
 #SBATCH -t 0-18:00
 #SBATCH --mem=90G
-#SBATCH --array=0-3         # 4 tasks: 2 groups (ddid/noddid) × 2 types (EN/IN)
+#SBATCH --array=0-7         # 8 tasks: 4 gene-set groups × 2 lineage types (EN/IN)
 #SBATCH -o /mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/logs/scDRS_group_downstream_%A_%a.out
 #SBATCH -e /mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/logs/scDRS_group_downstream_%A_%a.err
 
@@ -14,28 +14,38 @@ source "$HOME/envs/scdrs_env/bin/activate"
 
 DATA_PATH=/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data
 
-# Array layout:
-# 0 = ddid   + EN
-# 1 = ddid   + IN
-# 2 = noddid + EN
-# 3 = noddid + IN
-if [ "${SLURM_ARRAY_TASK_ID}" -eq 0 ]; then
-    GROUP="ddid";   TYPE="EN"
-elif [ "${SLURM_ARRAY_TASK_ID}" -eq 1 ]; then
-    GROUP="ddid";   TYPE="IN"
-elif [ "${SLURM_ARRAY_TASK_ID}" -eq 2 ]; then
-    GROUP="noddid"; TYPE="EN"
-elif [ "${SLURM_ARRAY_TASK_ID}" -eq 3 ]; then
-    GROUP="noddid"; TYPE="IN"
+# Array layout: 4 gene-set groups × 2 lineage types
+# 0 = p_hat DDID (ASDDH)              + EN
+# 1 = p_hat DDID (ASDDH)              + IN
+# 2 = p_hat NoDDID (ASDDL+ASDDA)      + EN
+# 3 = p_hat NoDDID (ASDDL+ASDDA)      + IN
+# 4 = per-proband NoDDID (ASDDA, FDR<0.001) + EN
+# 5 = per-proband NoDDID (ASDDA, FDR<0.001) + IN
+# 6 = per-proband NoDDID (ASDDA, FDR<0.01)  + EN
+# 7 = per-proband NoDDID (ASDDA, FDR<0.01)  + IN
+
+# Gene-set group (0-3) and lineage type (EN/IN)
+GS_INDEX=$(( SLURM_ARRAY_TASK_ID / 2 ))
+if (( SLURM_ARRAY_TASK_ID % 2 == 0 )); then
+    TYPE="EN"
 else
-    echo "ERROR: unexpected SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
-    exit 1
+    TYPE="IN"
 fi
 
-echo "Resolved parameters: GROUP = ${GROUP}, TYPE = ${TYPE}"
+case "${GS_INDEX}" in
+    0) GROUP="ddid";   SUFFIX="new_DMN" ;;
+    1) GROUP="noddid"; SUFFIX="new_DMN" ;;
+    2) GROUP="noddid"; SUFFIX="perproband_new_DMN" ;;
+    3) GROUP="noddid"; SUFFIX="perproband_new_DMN_fdr01" ;;
+    *)
+        echo "ERROR: unexpected SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
+        exit 1
+        ;;
+esac
 
-# TRAIT="ASC_Pfdr_${GROUP}_new_DMN"
-TRAIT="ASC_Pfdr_${GROUP}_perproband_new_DMN"
+echo "Resolved parameters: GROUP=${GROUP}, SUFFIX=${SUFFIX}, TYPE=${TYPE}"
+
+TRAIT="ASC_Pfdr_${GROUP}_${SUFFIX}"
 
 H5AD_FILE=${DATA_PATH}/SnMultiome_Wang2025/obj_rna_raw_${TYPE}_slingshot.h5ad
 SCORE_FOLDER="/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/WangNature/scDRS/run_ddid_noddid/score_file/${GROUP}_genes"
