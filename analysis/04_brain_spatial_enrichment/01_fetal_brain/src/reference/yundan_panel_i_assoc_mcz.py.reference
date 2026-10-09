@@ -1,0 +1,67 @@
+#!/usr/bin/env python
+"""Panel i forest plot using scDRS assoc_mcz (group-level MC z-score)."""
+import pandas as pd
+import matplotlib.pyplot as plt
+
+PI = pd.read_csv("smith_asc_figure2_spatial_bundle/results/panel_i_group_stats.csv")
+
+LORD = ["L2/3", "L4", "L5/6", "SP", "IZ", "oSVZ", "iSVZ", "VZ"]
+LABEL_MAP = {"upper plate": "L2/3"}
+PI["layer_display"] = PI["layer"].map(lambda x: LABEL_MAP.get(x, x))
+
+SERIES_MAP = {"occipital (not split)": "V1+V2"}
+PI["series_display"] = PI["series"].map(lambda x: SERIES_MAP.get(x, x))
+
+SERIES_COLOR = {
+    "PFC": "#4878CF",
+    "V1": "#6B3A2A",
+    "V2": "#D4908F",
+    "V1+V2": "#888888",
+}
+SERIES_ORDER = ["PFC", "V1", "V2", "V1+V2"]
+
+y_map = {L: i for i, L in enumerate(LORD)}
+offsets = {"PFC": 0.24, "V1": 0.0, "V2": -0.20, "V1+V2": -0.20}
+
+fig, ax = plt.subplots(figsize=(3.5, 5.2))
+
+for _, r in PI.iterrows():
+    ld = LABEL_MAP.get(r["layer"], r["layer"])
+    sd = SERIES_MAP.get(r.series, r.series)
+    y = y_map[ld] + offsets[sd]
+    c = SERIES_COLOR[sd]
+    filled = r.assoc_fdr < 0.05
+    size = max(25, r.n_cell * 0.18)
+
+    ax.scatter(r.assoc_mcz, y, s=size, zorder=4,
+               color=c if filled else "white",
+               edgecolors=c, linewidths=1.0)
+
+ax.set_yticks(range(len(LORD)))
+ax.set_yticklabels(LORD, fontsize=11, fontweight="bold")
+ax.set_xlabel("Enrichment Z-score", fontsize=9)
+ax.set_title("Regional & Laminar\nEnrichments", fontsize=14, fontweight="bold", pad=10)
+
+legend_elements = []
+for s in SERIES_ORDER:
+    legend_elements.append(
+        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=SERIES_COLOR[s],
+                   markeredgecolor=SERIES_COLOR[s], markersize=7, label=s, linewidth=0))
+
+ax.legend(handles=legend_elements, loc="lower right", fontsize=8,
+          framealpha=0.95, edgecolor="#CCCCCC", fancybox=False,
+          handletextpad=0.3, borderpad=0.4)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+ax.tick_params(axis="x", labelsize=9)
+
+for i in range(len(LORD) + 1):
+    ax.axhline(i - 0.5, color="#E0E0E0", linewidth=0.5, zorder=0)
+ax.set_axisbelow(True)
+ax.set_ylim(len(LORD) - 0.5, -0.5)
+
+plt.tight_layout()
+plt.savefig("panel_i_assoc_mcz.png", dpi=200, bbox_inches="tight")
+plt.savefig("panel_i_assoc_mcz.pdf", dpi=200, bbox_inches="tight")
+print("Saved panel_i_assoc_mcz.{png,pdf}")

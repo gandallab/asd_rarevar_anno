@@ -1,0 +1,39 @@
+stage,component,version
+Stage 0 - Seurat export (R),R,4.4.3
+Stage 0 - Seurat export (R),platform,aarch64-apple-darwin20.0.0
+Stage 0 - Seurat export (R),Seurat,5.5.1
+Stage 0 - Seurat export (R),SeuratObject,5.4.0
+Stage 0 - Seurat export (R),sctransform,0.4.3
+Stage 0 - Seurat export (R),Matrix,1.7.6
+Stage 0 - Seurat export (R),irlba,2.3.7
+Stage 0 - Seurat export (R),uwot,0.2.5
+Stage 0 - Seurat export (R),RcppAnnoy,0.0.23
+Stage 0 - Seurat export (R),Rcpp,1.1.2
+Stage 0 - Seurat export (R),arrow,25.0.0
+Stage 0 - Seurat export (R),dplyr,1.2.1
+Stage 0 - Seurat export (R),png,0.1.9
+Stage 0 - Seurat export (R),future,1.75.0
+Stage 0 - Seurat export (R),rlang,1.3.0
+Stage 0 - Seurat export (R),ggplot2,4.0.3
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",python,3.11.16
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",platform,macOS-27.0.1-arm64-arm-64bit
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",scdrs (CLI masthead),1.0.2
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",scdrs,1.0.2
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",scanpy,1.11.5
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",anndata,0.12.19
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",numpy,1.26.4
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",scipy,1.12.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",pandas,2.3.3
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",statsmodels,0.15.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",matplotlib,3.11.1
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",numba,0.67.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",h5py,3.16.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",pyarrow,25.0.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",scikit-learn,1.9.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",fire,0.7.1
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",legacy-api-wrap,1.5
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",natsort,8.4.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",tqdm,4.70.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",umap-learn,0.5.12
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",pynndescent,0.6.0
+"Stages 1-5 and 7 - scDRS scoring, group analysis, figures (Python)",llvmlite,0.49.0

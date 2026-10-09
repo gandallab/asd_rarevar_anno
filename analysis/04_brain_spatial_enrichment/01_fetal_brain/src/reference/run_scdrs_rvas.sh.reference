@@ -1,0 +1,60 @@
+#!/bin/bash
+#SBATCH --job-name=scDRS
+#SBATCH -n 32               # Number of cores (-n)
+#SBATCH -N 1                # Ensure that all cores are on one Node (-N)
+#SBATCH -t 0-18:00          # Runtime in D-HH:MM, minimum of 10 minutes
+#SBATCH --mem=120G          # Memory pool for all cores (see also --mem-per-cpu)
+#SBATCH --array=0-3         # 4 tasks for 4 gene numbers          
+#SBATCH -o /mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/logs/scDRS_%A_%a.out
+#SBATCH -e /mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/logs/scDRS_%A_%a.err 
+
+echo "JobID: ${SLURM_JOB_ID}, ArrayID: ${SLURM_ARRAY_TASK_ID}"
+date
+source "$HOME/envs/scdrs_env/bin/activate"
+
+TRAIT_SCORE="ASC_TADA_Pfdr"; TRAIT="ASC_Pfdr"
+DATA_PATH=/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/data
+H5AD_FILE=${DATA_PATH}/SnMultiome_Wang2025/obj_rna_raw.h5ad
+
+P_FILE=${DATA_PATH}/RVAS_result/full_results_wcounts_pfdr.tsv
+COV_FILE=${DATA_PATH}/SnMultiome_Wang2025/donorID_sex_ngene.cov 
+
+GENE_NUMBERS=(253 416 696 951) 
+GENE_NUMBER=${GENE_NUMBERS[$SLURM_ARRAY_TASK_ID]}
+
+echo "Running for GENE_NUMBER = ${GENE_NUMBER}"
+GS_DIR=${DATA_PATH}/scDRS/gs_file
+OUT_FOLDER=/mnt/isilon/gandal_lab/liaoyd/project/asd_rarevar_anno/result/WangNature/scDRS/run_v8/score_file/${GENE_NUMBER}_genes
+
+mkdir -p "${GS_DIR}"
+mkdir -p ${OUT_FOLDER}
+
+# Generate GS file if it doesn't exist
+GS_FILE=${GS_DIR}/${TRAIT_SCORE}.${GENE_NUMBER}.gs
+
+if [ ! -f "${GS_FILE}" ]; then
+    echo "Generating GS file: ${GS_FILE}"
+    scdrs munge-gs \
+        --out-file "${GS_FILE}" \
+        --pval-file "${P_FILE}" \
+        --weight zscore \
+        --n-max "${GENE_NUMBER}"
+else
+    echo "GS file already exists: ${GS_FILE}"
+fi
+
+# Compute scDRS Score
+echo "Running scDRS compute-score with ${GENE_NUMBER} genes..."
+scdrs compute-score \
+    --h5ad-file ${H5AD_FILE} \
+    --h5ad-species human \
+    --gs-file ${GS_FILE} \
+    --gs-species human \
+    --out-folder ${OUT_FOLDER} \
+    --cov-file ${COV_FILE} \
+    --flag-filter-data True \
+    --flag-raw-count True \
+    --n-ctrl 1000 \
+    --flag-return-ctrl-raw-score False \
+    --flag-return-ctrl-norm-score True
+
