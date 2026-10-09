@@ -1,0 +1,25 @@
+# Lint policy for this analysis module.
+#
+# These are single-run analysis scripts, not a library: each is executed once,
+# top to bottom, writes its outputs and exits. Several of ruff's defaults encode
+# conventions for long-lived application code and work against readability here,
+# so they are turned off deliberately rather than left to accumulate as noise.
+line-length = 100
+
+[lint]
+ignore = [
+    # Reading a small table or JSON with open()/read_csv() in one expression is
+    # the idiom of this kind of script. The process exits in seconds and every
+    # handle is released; wrapping each in a context manager would add a nesting
+    # level per file read and bury the analysis.
+    "SIM115",
+    # Imports are grouped by role (numerics, plotting, statistics) rather than
+    # alphabetised, which is how the scientific stack is normally read.
+    "I001",
+    # int(len(x)) and float(x.mean()) around values written to JSON are explicit
+    # casts to plain Python scalars: json.dump() cannot serialise numpy types,
+    # and the cast says so at the point of use.
+    "RUF046",
+    # dict(...) over {...} where keyword form reads as a record of named fields.
+    "C408",
+]

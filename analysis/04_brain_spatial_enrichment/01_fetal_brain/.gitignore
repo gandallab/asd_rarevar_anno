@@ -1,0 +1,39 @@
+# Files that running the stages writes into this directory.
+
+# numba compilation cache (the stage scripts set NUMBA_CACHE_DIR to this path)
+.numba_cache/
+
+# exported counts, AnnData files, covariates, scores, group tables, logs and
+# the version captures that stage 7 reads
+export/
+logs/
+handoff/
+results/*
+
+# results/occipital/weighted_vs_uniform.csv is shipped with the code: stage 15
+# reads it and the README and glossary cite it. The rest of results/ is output.
+!results/occipital/
+results/occipital/*
+!results/occipital/weighted_vs_uniform.csv
+
+# the gene set is not redistributed (see README)
+genesets/
+
+# figures and the packaged reproduction bundle
+figures/
+*.png
+*.pdf
+*.svg
+*.zip
+*_bundle/
+
+# large data files: AnnData, Seurat objects, compressed score files
+*.h5ad
+*.rds
+*.gz
+
+# editor, notebook and R session files
+.DS_Store
+.ipynb_checkpoints/
+.Rhistory
+.RData
