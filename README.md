@@ -132,7 +132,7 @@ numbering.
 
 Shared utilities used across modules:
 
-- [`cluster_labels.R`](analysis/_shared/cluster_labels.R) — EN/IN lineage cluster label maps; used by AUCell group-test scripts, [`figures/fig01`](figures/fig01/), and [`figures/fig05`](figures/fig05/)
+- [`cluster_labels.R`](analysis/_shared/cluster_labels.R) — EN/IN lineage cluster label maps; used by AUCell group-test scripts, [`figures/fig01`](figures/fig01/), and [`figures/fig06`](figures/fig06/)
 - [`syngo_helpers.R`](analysis/_shared/syngo_helpers.R) — SynGO loading, HotNet gene-set construction, AUCell ordering/color helpers; used by AUCell compute scripts and HotNet AUCell figure scripts
 - [`scdrs_aucell_helpers.R`](analysis/_shared/scdrs_aucell_helpers.R) — scDRS × AUCell grouping, timepoint, control-column, and lineage-mapping helpers; used by AUCell scDRS correlation scripts
 
@@ -180,6 +180,13 @@ GO/topic-model enrichments and developmental trajectories for identified modules
 Cortical spatial enrichment of ASD risk genes and gene programs, with spin-test significance and developmental spatial enrichments.
 
 **[`01_fetal_brain/`](analysis/04_brain_spatial_enrichment/01_fetal_brain/)** — Prenatal Visium spatial transcriptomics scDRS enrichment (occipital cortex layers). See [`01_fetal_brain/README.md`](analysis/04_brain_spatial_enrichment/01_fetal_brain/README.md) for details.
+- [`src/00_prepare_from_seurat.R`](analysis/04_brain_spatial_enrichment/01_fetal_brain/src/00_prepare_from_seurat.R) — convert Seurat object to scDRS inputs
+- [`src/01_build_h5ad_and_cov.py`](analysis/04_brain_spatial_enrichment/01_fetal_brain/src/01_build_h5ad_and_cov.py) — build h5ad and covariate files
+- [`src/02_compute_score.sh`](analysis/04_brain_spatial_enrichment/01_fetal_brain/src/02_compute_score.sh) — run scDRS compute-score
+- [`src/03_layers_and_embedding.py`](analysis/04_brain_spatial_enrichment/01_fetal_brain/src/03_layers_and_embedding.py) — laminar annotation and UMAP embedding
+- [`src/04_group_analysis.sh`](analysis/04_brain_spatial_enrichment/01_fetal_brain/src/04_group_analysis.sh) — run scDRS perform-downstream by layer group
+- [`src/05_figure.py`](analysis/04_brain_spatial_enrichment/01_fetal_brain/src/05_figure.py) — generate Fig 2 occipital-only panels
+
 
 **[`02_adult_brain/`](analysis/04_brain_spatial_enrichment/02_adult_brain/)** — Adult cortical enrichment against the Allen Human Brain Atlas (AHBA), with spin-test significance and mubrain mid-fetal cortical region × tissue layer enrichments.
 - [`04_00_build-ahba-matrix.ipynb`](analysis/04_brain_spatial_enrichment/02_adult_brain/04_00_build-ahba-matrix.ipynb) — build the AHBA region × gene expression matrix
@@ -247,7 +254,7 @@ raw data here.
 | Directory | Contents |
 |-----------|----------|
 | [`fig01/`](figures/fig01/) | scDRS UMAP (`01`), lineage z-score (`02`), trajectory (`03`), and paired PFC/V1 per-donor subclass Z-score dumbbell plots (`04`) |
-| [`fig02/`](figures/fig02/) | Brain spatial enrichment panels; code in [`analysis/04_brain_spatial_enrichment/`](analysis/04_brain_spatial_enrichment/) — see [`fig02/README.md`](figures/fig02/README.md) |
+| [`fig02/`](figures/fig02/) | Brain spatial enrichment panels, see [`fig02/README.md`](figures/fig02/README.md) |
 | [`fig03/`](figures/fig03/) | AUCell proportion heatmap (`01`), [`Fig3.qmd`](figures/fig03/Fig3.qmd) |
 | [`fig04/`](figures/fig04/) | AUCell proportion heatmap (`01`), [`Fig4.qmd`](figures/fig04/Fig4.qmd) |
 | [`fig05/`](figures/fig05/) | [`Fig5.qmd`](figures/fig05/Fig5.qmd) |
