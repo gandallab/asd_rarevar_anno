@@ -1,5 +1,5 @@
 ---
-title: "Fig3"
+title: "Fig4"
 format: html
 ---
 
@@ -239,7 +239,7 @@ p_syn_bipartite
 Export separately to combine with the synaptic proteomics figure
 
 ```{r synaptic_proteomics_enrichment, fig.height = 2.5, fig.width = 2}
-p_fig3diii <- df_syn_prot %>%
+p_fig4diii <- df_syn_prot %>%
 
     ggplot(aes(x = -log10(FDR),
                y = reorder_within(str_wrap(Description, 20), -FDR, domain))) +
@@ -277,11 +277,11 @@ p_fig3diii <- df_syn_prot %>%
         plot.margin           = margin(0, 0, 0, 0),
         plot.title            = element_text(size = 7)
     )
-p_fig3diii
+p_fig4diii
 
 ggsave(
-    filename = file.path(figures_dir, "Fig3", "Fig3Diii_raw.pdf"),
-    plot = p_fig3diii,
+    filename = file.path(figures_dir, "Fig4", "Fig4Diii_raw.pdf"),
+    plot = p_fig4diii,
     height    = 2.4,
     width     = 1.5,
     dpi       = 300
@@ -296,16 +296,16 @@ row_top <- p_cc
 row_bottom <- p_syn_bipartite + plot_spacer() +
     plot_layout(widths = c(1, 1))
 
-fig3_combined <- row_top / row_bottom +
+fig4_combined <- row_top / row_bottom +
     plot_layout(heights = c(1, 1.25)) +
     plot_annotation(tag_levels = "A") &
     theme(plot.tag = element_text(face = "bold", size = 10))
 
-fig3_combined
+fig4_combined
 
 ggsave(
-    filename = file.path(figures_dir, "Fig3", "Fig3_raw.pdf"),
-    plot = fig3_combined,
+    filename = file.path(figures_dir, "Fig4", "Fig4_raw.pdf"),
+    plot = fig4_combined,
     height    = 9.72,
     width     = 7.09,
     dpi       = 300

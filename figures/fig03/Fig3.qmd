@@ -1,5 +1,5 @@
 ---
-title: "Fig2"
+title: "Fig3"
 format: html
 ---
 
@@ -776,16 +776,16 @@ row_mid <- p_brainspan_traj + free(p_tstat_distr) + plot_spacer() +
 
 row_bottom <- wrap_elements(p_gr_subcluster)
 
-fig2_combined <- (row_top / row_mid / row_bottom) +
+fig3_combined <- (row_top / row_mid / row_bottom) +
     plot_layout(heights = c(1.65, 0.65, 1.8)) +
     plot_annotation(tag_levels = "A") &
     theme(plot.tag = element_text(face = "bold", size = 10))
 
-fig2_combined
+fig3_combined
 
 ggsave(
-    filename = file.path(figures_dir, "Fig2", "Fig2_raw.pdf"),
-    plot = fig2_combined,
+    filename = file.path(figures_dir, "Fig3", "Fig3_raw.pdf"),
+    plot = fig3_combined,
     height    = 247 / 25.4,
     width     = 180 / 25.4,
     dpi       = 300

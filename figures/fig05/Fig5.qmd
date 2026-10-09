@@ -1,5 +1,5 @@
 ---
-title: "Fig4"
+title: "Fig5"
 format: html
 ---
 
@@ -246,7 +246,7 @@ p_module_hotnet <- df_hotnet_ora_plot %>%
 p_module_hotnet
 
 # ggsave(
-#     filename = file.path(figures_dir, "Fig4", "Fig4A_tmp.pdf"),
+#     filename = file.path(figures_dir, "Fig5", "Fig5A_tmp.pdf"),
 #     plot     = p_module_hotnet,
 #     height   = 4,
 #     width    = 2.5,
@@ -510,16 +510,16 @@ row_top <- p_module_hotnet + wrap_elements(full = p_morph) +
 row_bottom <- wrap_elements(full = p_regulon_go) +  wrap_elements(full = p_regulon_syngo) +
     plot_layout(widths = c(1.5, 1))
 
-fig4_combined <- row_top / row_bottom +
+fig5_combined <- row_top / row_bottom +
     plot_layout(heights = c(1, 3)) &
     plot_annotation(tag_levels = "A") &
     theme(plot.tag = element_text(face = "bold", size = 10))
 
-fig4_combined
+fig5_combined
 
 ggsave(
-    filename = file.path(figures_dir, "Fig4", "Fig4_raw.pdf"),
-    plot = fig4_combined,
+    filename = file.path(figures_dir, "Fig5", "Fig5_raw.pdf"),
+    plot = fig5_combined,
     height    = 9,
     width     = 7.09,
     dpi       = 300

@@ -42,10 +42,14 @@ Python 3.9.14 (scDRS / trajectory modules):
 | statsmodels | 0.14.5 |
 | matplotlib | 3.9.4 |
 
-Python 3.10 (spatial enrichment module, `analysis/04_brain_spatial_enrichment/`), via two pinned conda environments in that directory:
+Python 3.10 (adult brain spatial enrichment, `analysis/04_brain_spatial_enrichment/02_adult_brain/`), via two pinned conda environments:
 
-- [`ahba.yml`](analysis/04_brain_spatial_enrichment/ahba.yml) — AHBA matrix build (abagen 0.1.3; numpy 1.26, pandas 1.5, nilearn 0.10)
-- [`spin.yml`](analysis/04_brain_spatial_enrichment/spin.yml) — spin tests and spatial enrichment (neuromaps 0.0.7; numpy 2.2, pandas 2.3, nilearn 0.14)
+- [`ahba.yml`](analysis/04_brain_spatial_enrichment/02_adult_brain/ahba.yml) — AHBA matrix build (abagen 0.1.3; numpy 1.26, pandas 1.5, nilearn 0.10)
+- [`spin.yml`](analysis/04_brain_spatial_enrichment/02_adult_brain/spin.yml) — spin tests and spatial enrichment (neuromaps 0.0.7; numpy 2.2, pandas 2.3, nilearn 0.14)
+
+Python 3.11.16 (fetal brain spatial enrichment, `analysis/04_brain_spatial_enrichment/01_fetal_brain/`):
+
+- [`environment_python.yml`](analysis/04_brain_spatial_enrichment/01_fetal_brain/environment_python.yml) — scDRS 1.0.2, scanpy 1.11.5, anndata 0.12.19
 
 Create each with `conda env create -f <file>.yml`; see the header of each file for kernel registration.
 
@@ -76,7 +80,7 @@ The following publicly available datasets are required for full reproduction but
 | Rare variant association results (gene-level counts, TADA) | [Satterstrom et al. 2026](https://www.medrxiv.org/content/10.64898/2026.08.24.26360398v1), Tables S7, S9, S17 |
 | Developing snMultiome human brain atlas (Wang et al. 2025) | https://doi.org/10.5061/dryad.2280gb612 |
 | uBrain mid-fetal cortical microarray (Ball et al. 2024) | https://zenodo.org/records/10622337 |
-| Prenatal Visium spatial transcriptome (Aivazidis et al. 2025) | https://zenodo.org/records/14422018 |
+| Prenatal Visium spatial transcriptome (Qian et al. 2025) | https://zenodo.org/records/14422018 |
 | Pre-synaptic mass spectrometry (Dumrongprechachan et al. 2022) | https://www.ebi.ac.uk/pride/archive?keyword=PXD030864 |
 | ASD GWAS summary statistics (Matoba et al. 2020) | https://bitbucket.org/steinlabunc/spark_asd_sumstats |
 | BrainSpan developmental transcriptome (`expression_matrix.csv`) | https://www.brainspan.org/static/download.html |
@@ -84,7 +88,7 @@ The following publicly available datasets are required for full reproduction but
 
 ## Demo
 
-Each `analysis/` module contains numbered scripts that run on `data/` and the external datasets listed above. Expected outputs are provided in `outputs/analysis/` (statistical results) and `outputs/figures/` (rendered figures). To verify the setup, render any figure notebook (e.g. `quarto render figures/fig03/Fig3.qmd`), which reads from pre-computed outputs and completes in under one minute. Full re-execution of compute-intensive modules (scDRS, AUCell) requires the single-cell atlas on the HPC; see [`data/README.md`](data/README.md) for data locations. The HPC scripts for these modules (`analysis/01_scdrs_trajectory/`, `analysis/03_module_enrichments/03_01_AUCell.R`, `analysis/05_SynGO/05_04_aucell/`, `analysis/07_ddid_stratification/01_input_prep/`–`03_group_tests/`, and the `.R` plotting scripts in `figures/fig01/`, `fig03/`, `fig05/` and `supp_fig/`) use absolute cluster paths that must be edited to point at your local copies of the data.
+Each `analysis/` module contains numbered scripts that run on `data/` and the external datasets listed above. Reusable statistical outputs are provided in `outputs/analysis/` and rendered figures in `outputs/figures/`. To verify the setup, render any figure notebook (e.g. `quarto render figures/fig03/Fig3.qmd`), which reads from pre-computed outputs and completes in under one minute. Full re-execution of compute-intensive modules (scDRS, AUCell) requires the single-cell atlas on the HPC; see [`data/README.md`](data/README.md) for data locations. The HPC scripts for these modules (`analysis/01_scdrs_trajectory/`, `analysis/03_module_enrichments/03_01_AUCell.R`, `analysis/05_SynGO/05_04_aucell/`, `analysis/07_ddid_stratification/01_input_prep/`–`03_group_tests/`, and the `.R` plotting scripts in `figures/fig01/`, `fig03/`, `fig05/` and `supp_fig/`) use absolute cluster paths that must be edited to point at your local copies of the data.
 
 ## Repository layout
 
@@ -101,7 +105,7 @@ Each `analysis/` module contains numbered scripts that run on `data/` and the ex
 │   ├── 06_MORPH_annotation/      # MORPH subclustering and TF-regulon/MEF2C module analyses
 │   └── 07_ddid_stratification/   # DD/ID comorbidity-stratified analyses
 ├── figures/         # Manuscript figure reproduction by figure number
-│   ├── fig01/ … fig05/
+│   ├── fig01/ … fig06/
 │   └── supp_fig/
 ├── functions/       # Shared plotting/network-analysis helper functions
 ├── outputs/
@@ -173,18 +177,20 @@ GO/topic-model enrichments and developmental trajectories for identified modules
 
 ### [`analysis/04_brain_spatial_enrichment/`](analysis/04_brain_spatial_enrichment/)
 
-Cortical spatial enrichment of ASD risk genes and gene programs against the Allen Human
-Brain Atlas (AHBA), with spin-test significance and mubrain mid-fetal cortical region x tissue layer enrichments.
+Cortical spatial enrichment of ASD risk genes and gene programs, with spin-test significance and developmental spatial enrichments.
 
-- [`04_00_build-ahba-matrix.ipynb`](analysis/04_brain_spatial_enrichment/04_00_build-ahba-matrix.ipynb) — build the AHBA region × gene expression matrix
-- [`04_01_asd-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/04_01_asd-spatial-enrichment.ipynb) — ASD risk-gene cortical enrichment + spin tests
-- [`04_02_topic-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/04_02_topic-spatial-enrichment.ipynb) — GO-topic/program spatial enrichment, Gandal 2022 dysregulation comparison
-- [`04_03_tsyporin-SA-axis.qmd`](analysis/04_brain_spatial_enrichment/04_03_tsyporin-SA-axis.qmd) — sensorimotor–association axis overlap (Tsyporin patterning genes)
-- [`04_04_mubrain-developmental-enrichment.qmd`](analysis/04_brain_spatial_enrichment/04_04_mubrain-developmental-enrichment.qmd) — developmental (mubrain) spatial enrichment
-- [`04_05_module-spatial-maps.ipynb`](analysis/04_brain_spatial_enrichment/04_05_module-spatial-maps.ipynb) — per-module cortical maps and pairwise spatial correlations
-- [`run_spin_test.py`](analysis/04_brain_spatial_enrichment/run_spin_test.py), [`maps_null_test.py`](analysis/04_brain_spatial_enrichment/maps_null_test.py), [`spatial_helpers.py`](analysis/04_brain_spatial_enrichment/spatial_helpers.py) — spin-test/null-model computation helpers
-- [`spin_prep.sbatch`](analysis/04_brain_spatial_enrichment/spin_prep.sbatch), [`spin_array.sbatch`](analysis/04_brain_spatial_enrichment/spin_array.sbatch), [`submit_spin_tests.sh`](analysis/04_brain_spatial_enrichment/submit_spin_tests.sh), [`spin.yml`](analysis/04_brain_spatial_enrichment/spin.yml), [`ahba.yml`](analysis/04_brain_spatial_enrichment/ahba.yml) — HPC job scripts and environments
-- [`dk_atlas_schematic.ipynb`](analysis/04_brain_spatial_enrichment/dk_atlas_schematic.ipynb) — Desikan-Killiany atlas schematic for figures
+**[`01_fetal_brain/`](analysis/04_brain_spatial_enrichment/01_fetal_brain/)** — Prenatal Visium spatial transcriptomics scDRS enrichment (occipital cortex layers). See [`01_fetal_brain/README.md`](analysis/04_brain_spatial_enrichment/01_fetal_brain/README.md) for details.
+
+**[`02_adult_brain/`](analysis/04_brain_spatial_enrichment/02_adult_brain/)** — Adult cortical enrichment against the Allen Human Brain Atlas (AHBA), with spin-test significance and mubrain mid-fetal cortical region × tissue layer enrichments.
+- [`04_00_build-ahba-matrix.ipynb`](analysis/04_brain_spatial_enrichment/02_adult_brain/04_00_build-ahba-matrix.ipynb) — build the AHBA region × gene expression matrix
+- [`04_01_asd-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/02_adult_brain/04_01_asd-spatial-enrichment.ipynb) — ASD risk-gene cortical enrichment + spin tests
+- [`04_02_topic-spatial-enrichment.ipynb`](analysis/04_brain_spatial_enrichment/02_adult_brain/04_02_topic-spatial-enrichment.ipynb) — GO-topic/program spatial enrichment, Gandal 2022 dysregulation comparison
+- [`04_03_tsyporin-SA-axis.qmd`](analysis/04_brain_spatial_enrichment/02_adult_brain/04_03_tsyporin-SA-axis.qmd) — sensorimotor–association axis overlap (Tsyporin patterning genes)
+- [`04_04_mubrain-developmental-enrichment.qmd`](analysis/04_brain_spatial_enrichment/02_adult_brain/04_04_mubrain-developmental-enrichment.qmd) — developmental (mubrain) spatial enrichment
+- [`04_05_module-spatial-maps.ipynb`](analysis/04_brain_spatial_enrichment/02_adult_brain/04_05_module-spatial-maps.ipynb) — per-module cortical maps and pairwise spatial correlations
+- [`run_spin_test.py`](analysis/04_brain_spatial_enrichment/02_adult_brain/run_spin_test.py), [`maps_null_test.py`](analysis/04_brain_spatial_enrichment/02_adult_brain/maps_null_test.py), [`spatial_helpers.py`](analysis/04_brain_spatial_enrichment/02_adult_brain/spatial_helpers.py) — spin-test/null-model computation helpers
+- [`spin_prep.sbatch`](analysis/04_brain_spatial_enrichment/02_adult_brain/spin_prep.sbatch), [`spin_array.sbatch`](analysis/04_brain_spatial_enrichment/02_adult_brain/spin_array.sbatch), [`submit_spin_tests.sh`](analysis/04_brain_spatial_enrichment/02_adult_brain/submit_spin_tests.sh), [`spin.yml`](analysis/04_brain_spatial_enrichment/02_adult_brain/spin.yml), [`ahba.yml`](analysis/04_brain_spatial_enrichment/02_adult_brain/ahba.yml) — HPC job scripts and environments
+- [`dk_atlas_schematic.ipynb`](analysis/04_brain_spatial_enrichment/02_adult_brain/dk_atlas_schematic.ipynb) — Desikan-Killiany atlas schematic for figures
 
 ### [`analysis/05_SynGO/`](analysis/05_SynGO/)
 
@@ -216,7 +222,7 @@ DD/ID comorbidity-stratified enrichment and burden analyses.
 - [`03_group_tests/`](analysis/07_ddid_stratification/03_group_tests/) — DD/ID sensitivity lineage group analysis
 - [`04_gene_set_DDID_stratification/`](analysis/07_ddid_stratification/04_gene_set_DDID_stratification/) — module-level (`07_00`) and SynGO-level (`07_01`) O/E DD/ID enrichment analyses
 
-Figure-specific plotting scripts are in [`figures/fig05/`](figures/fig05/).
+Figure-specific plotting scripts are in [`figures/fig06/`](figures/fig06/).
 
 ### [`functions/`](functions/)
 
@@ -241,15 +247,16 @@ raw data here.
 | Directory | Contents |
 |-----------|----------|
 | [`fig01/`](figures/fig01/) | scDRS UMAP (`01`), lineage z-score (`02`), trajectory (`03`), and paired PFC/V1 per-donor subclass Z-score dumbbell plots (`04`) |
-| [`fig02/`](figures/fig02/) | [`Fig2.qmd`](figures/fig02/Fig2.qmd) |
+| [`fig02/`](figures/fig02/) | Brain spatial enrichment panels; code in [`analysis/04_brain_spatial_enrichment/`](analysis/04_brain_spatial_enrichment/) — see [`fig02/README.md`](figures/fig02/README.md) |
 | [`fig03/`](figures/fig03/) | AUCell proportion heatmap (`01`), [`Fig3.qmd`](figures/fig03/Fig3.qmd) |
-| [`fig04/`](figures/fig04/) | [`Fig4.qmd`](figures/fig04/Fig4.qmd) |
-| [`fig05/`](figures/fig05/) | DD/ID gene-set distribution and lineage comparison dotplot |
+| [`fig04/`](figures/fig04/) | AUCell proportion heatmap (`01`), [`Fig4.qmd`](figures/fig04/Fig4.qmd) |
+| [`fig05/`](figures/fig05/) | [`Fig5.qmd`](figures/fig05/Fig5.qmd) |
+| [`fig06/`](figures/fig06/) | DD/ID lineage comparison dotplot (`01`) |
 | [`module_slides/`](figures/module_slides/) | [`module-slides.qmd`](figures/module_slides/module-slides.qmd) — per-module summary slides (stats, GO/SynGO enrichments, spatial maps, network plots) |
 | [`supp_fig/`](figures/supp_fig/) | mclust type composition markers (`00`), scDRS RVAS vs GWAS group comparison (`01`), paired PFC/V1 mclust-group Z-diff (`02`), HotNet UMAP/pseudotime (`03`), topic × scDRS correlation (`04_1`), HotNet × scDRS correlation (`04_2`), regional enrichment burden analysis (`05`) |
 
 ## Outputs
 
 - [`outputs/analysis/`](outputs/analysis/) — reusable statistical outputs mirrored per analysis module (module stats, GO enrichments, AUCell scores, SynGO/MORPH results, DD/ID enrichment tables)
-- [`outputs/figures/`](outputs/figures/) — rendered figure PDFs/PNGs, including per-module summary slides ([`module_slides/`](outputs/figures/module_slides/)) and the final supplementary figures ([`supplement/`](outputs/figures/supplement/), `Supp-Fig-01.png`–`Supp-Fig-30.png`, numbered as in the supplement text)
+- [`outputs/figures/`](outputs/figures/) — rendered figure PDFs/PNGs (`Fig1/`–`Fig6/`), per-module summary slides ([`module_slides/`](outputs/figures/module_slides/)), and the final supplementary figures ([`supplement/`](outputs/figures/supplement/), `Supp-Fig-01.png`–`Supp-Fig-30.png`, numbered as in the supplement text)
 - [`outputs/tables/`](outputs/tables/) — submission-ready supplementary tables (`TableS1`–`TableS18`, numbered as in the supplement text)

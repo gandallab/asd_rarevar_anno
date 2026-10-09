@@ -41,7 +41,8 @@ Inputs   results/occipital/downstream/ASC_Pfdr.scdrs_group.panel_group,
          results/occipital/{per_spot_scores.parquet,spot_layer_assignment.csv,
          umap_A1.parquet}
 Outputs  results/occipital/layer_group_stats.csv,
-         Fig2-occipital-only.{png,pdf,svg}, results/occipital/05_figure_qc.json
+         outputs/figures/Fig2/Fig2-occipital-only.{png,pdf,svg},
+         results/occipital/05_figure_qc.json
 """
 import os, json
 
@@ -359,9 +360,12 @@ cb.ax.tick_params(labelsize=5.5)
 cb.outline.set_visible(False)
 cb.solids.set_rasterized(False)
 
-fig.savefig("Fig2-occipital-only.png", dpi=300, bbox_inches="tight")
-fig.savefig("Fig2-occipital-only.pdf", bbox_inches="tight")
-fig.savefig("Fig2-occipital-only.svg", bbox_inches="tight")
+PROJ = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+FIG_DIR = os.path.join(PROJ, "outputs/figures/Fig2")
+os.makedirs(FIG_DIR, exist_ok=True)
+fig.savefig(os.path.join(FIG_DIR, "Fig2-occipital-only.png"), dpi=300, bbox_inches="tight")
+fig.savefig(os.path.join(FIG_DIR, "Fig2-occipital-only.pdf"), bbox_inches="tight")
+fig.savefig(os.path.join(FIG_DIR, "Fig2-occipital-only.svg"), bbox_inches="tight")
 
 # Checks on the rendered figure.
 rr = fig.canvas.get_renderer()
