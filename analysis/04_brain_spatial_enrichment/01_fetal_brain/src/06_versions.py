@@ -13,7 +13,8 @@ embedding drawn in panels c-f. UMAP is stochastic and sensitive to all three, so
 that embedding should be expected to shift under a different combination even
 though the scores behind the colours will not.
 
-Inputs   handoff/versions_{python,r}.json, written by capture_versions() below
+Inputs   handoff/versions_r.json, written by stage 0;
+         handoff/versions_python.json, written by capture_versions() below
 Outputs  SOFTWARE_VERSIONS.csv, SOFTWARE_VERSIONS.md
 """
 import json, os, platform, re, sys

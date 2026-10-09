@@ -13,6 +13,7 @@
 #          export/A1_author_labels.csv                -> authors' per-spot annotation
 #          export/A1_coords_scales.parquet            -> spot coordinates
 #          export/A1_histology_lowres.png             -> H&E image
+#          handoff/versions_r.json                    -> R versions, read by stage 6
 #
 # A prefrontal section (D1_brain_no15.rds) from the same deposit was scored
 # alongside this one in an earlier version of the analysis. It was dropped: the
@@ -125,6 +126,31 @@ for (tag in names(OBJ)) {
   }
   rm(visium_obj, section_counts, im); invisible(gc())
 }
+
+# -----------------------------------------------------------------------------
+# 3. R-side version capture for stage 6
+#
+# Stage 6 (06_versions.py) builds SOFTWARE_VERSIONS.{csv,md} from the live
+# environments: it reads the Python side with importlib.metadata in its own
+# interpreter and the R side from this file, so the R capture happens here, in
+# the session that ran the export. Written with base R only, so the capture
+# adds nothing to the package list it records.
+# -----------------------------------------------------------------------------
+R_PACKAGES <- c("Seurat", "SeuratObject", "sctransform", "Matrix", "irlba",
+                "uwot", "RcppAnnoy", "Rcpp", "arrow", "dplyr", "png", "future",
+                "rlang", "ggplot2")
+r_versions <- c(list(R = paste(R.version$major, R.version$minor, sep = "."),
+                     platform = R.version$platform),
+                lapply(setNames(R_PACKAGES, R_PACKAGES), function(p)
+                  tryCatch(as.character(packageVersion(p)),
+                           error = function(e) NULL)))
+json_fields <- vapply(names(r_versions), function(k) {
+  v <- r_versions[[k]]
+  sprintf(" \"%s\": %s", k, if (is.null(v)) "null" else sprintf("\"%s\"", v))
+}, character(1))
+dir.create("handoff", showWarnings = FALSE)
+writeLines(c("{", paste0(json_fields, c(rep(",", length(json_fields) - 1), "")), "}"),
+           "handoff/versions_r.json")
 
 # -----------------------------------------------------------------------------
 cat("stage 0 complete\n")

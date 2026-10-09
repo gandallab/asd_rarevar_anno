@@ -82,7 +82,7 @@ None of the data is committed here. A run needs the following.
 | `Visium_A1_brain_011124.rds` | Zenodo 10.5281/zenodo.14422018 (Qian et al.). Stage 0 reads it; point `VISIUM_RDS_DIR` at the directory it is unpacked into. |
 | `A1_author_labels.csv` | Written by stage 0 from `AUTHOR_MAP` (see Source data). |
 | `ASC_TADA_Pfdr.253.gs` | Built with `scdrs munge-gs --weight zscore` from the ASC TADA table; not redistributed here. |
-| `handoff/versions_r.json` | R package versions. Stage 6 captures the Python side itself and reads this for the R side. |
+| `handoff/versions_r.json` | Written by stage 0 from its own session. Stage 6 captures the Python side itself and reads this for the R side. |
 | `export/`, `results/`, `logs/` | Written by the earlier stages. |
 | `ASC_Pfdr.full_score.gz` (tens of MB) | Written by stage 2 and read by stages 3, 4 and 8. It holds the per-spot scores and all 1,000 control sets, and is too large to commit. |
 
